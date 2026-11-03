@@ -2,18 +2,18 @@
 
 This report counts only native mechanisms with explicit evidence. The complete original decompilation is deliberately neither the denominator nor a list of missing work.
 
-Explicit evidence scope: **91.2 %** weighted, **83.0 %** fully evidenced (616/742 mechanisms; not overall game completion).
+Explicit evidence scope: **91.6 %** weighted, **83.8 %** fully evidenced (623/743 mechanisms; not overall game completion).
 
 Event commands (bhScenarioJmpT): 223/223 bound, 0 consumed only, 0 missing.
 
 | Area | Mechanisms | Evidence scope | Fully evidenced | Partial | Open |
 |---|---:|---:|---:|---:|---:|
 | Enemies/AI | 95/118 | 90.3 % | 80.5 % | 23 | 0 |
-| Effects | 233/251 | 96.4 % | 92.8 % | 18 | 0 |
-| Events/script | 82/97 | 92.3 % | 84.5 % | 15 | 0 |
+| Effects | 238/251 | 97.4 % | 94.8 % | 13 | 0 |
+| Events/script | 84/97 | 93.3 % | 86.6 % | 13 | 0 |
 | Player/combat | 61/80 | 88.1 % | 76.2 % | 19 | 0 |
 | Room/camera/door | 26/49 | 76.5 % | 53.1 % | 23 | 0 |
-| Menu/items/text | 48/62 | 85.5 % | 77.4 % | 10 | 4 |
+| Menu/items/text | 48/63 | 84.9 % | 76.2 % | 11 | 4 |
 | Models/animation | 12/18 | 80.6 % | 66.7 % | 5 | 1 |
 | Audio | 29/32 | 95.3 % | 90.6 % | 3 | 0 |
 | Flow/saving | 30/35 | 92.9 % | 85.7 % | 5 | 0 |
@@ -38,9 +38,5 @@ Only ledger entries with independent native evidence count. Matching names, orig
 - `cut.c` bhControlActiveCamera (partial, For stair state, the camera follows owP[0] from the last bhCalcModel rather than the player position. RM_3080 no longer stalls; camera_follow_target has a red control case. Free-control EXP_WORK interpolation, bhCheckCutAttribute floor input, and eye-camera return remain open.)
 - `cut.c` bhSetCut (partial, RoomWorld::cut_fog_handover carries cut fog and fog_ct rules through initialize_camera_clip. Other bhSetCut clip/hide portions remain as previously recorded.)
 - `cut.c` bhSetEventCamera (partial, Opcode 0x13 mode 0 now installs signed key position/angles, perspective, lock angles, and fog in both branches before event-camera initialization. Previous-key fields, cam.ln/flags, and bhSetEventHideObjLgt remain open.)
-
-## Unconfirmed historical ledger entries
-
-- `sub1.c` GetItem: Historical extraction/generator evidence is invalid. GetItem including branch 153 and subsequent ItemSort were extracted; StatusCancel, sprite transitions, and full StatusMain were not completely bound.
 
 Generated with `python3 tools/port_check.py --markdown docs/PORT_STATUS.md`.

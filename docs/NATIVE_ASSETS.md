@@ -101,7 +101,17 @@ reproduce the original alpha channel (`alpha_ok`, builder status
 `alpha-evidence-insufficient`). `--claimed <hd-manifest.json>` removes originals already
 assigned to a different pack file with a higher score (one pack file per original) and
 lists them under `eliminated`; this resolves sources whose best candidates are
-near-identical variants. These are content-match candidates,
+near-identical variants. Match tables given to `--claimed` only contribute entries that
+pass the builder tiers on their own; pack files sharing the GameCube texture hash never
+displace each other. `--skip-sources <hd-manifest.json>` leaves assigned pack files out of
+a re-run. Iterate `--claimed` with the manifest plus the previous table until a run adds
+no new target (fixpoint; reached after four rounds for GCD). A distinct runner-up original that is itself
+at least `.95` similar to the best original (luma and every channel, colour delta ≤ 8, same
+visibility) and closer to it than the pack image is cannot be separated by anything in the
+pack; it is listed under `indistinguishable_candidates` and no longer counts as the runner-up
+for the tier gap or the cross-size lead (same-picture variants in two rooms, inventory
+versus room item). Only the best original is written. Each worker caches the originals it touches (uint8); keep `--jobs` at 2..3 on a
+workstation. These are content-match candidates,
 not an exact GameCube-to-PS2 identity proof; unresolved sources remain unresolved.
 
 `build_hd_textures.py --existing-manifest mods/textures/hd-manifest.json`

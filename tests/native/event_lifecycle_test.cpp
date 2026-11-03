@@ -283,6 +283,18 @@ int main(int argc,char** argv){try{
   r.tick();check(z->enemy.mdflg&0x200u,"bhEneRenderSet mdflg 0x200 lost after a pass");
   check(r.world.bind({0xa5,0,0,0,{0xa5,0,1,0}})&&!(z->enemy.mdflg&0x200u),"bhEneRenderSet show does not clear mdflg 0x200");
   std::cout<<"bhSetDispObj/bhEneRenderSet write mdflg 0x1/0x200 on the enemy work and keep them.\n";}
+ // event.c bhWalAtariSet2 (0x7b): rom->walp[v] attr = u16, prm0..3, type; sonst nichts. RM_5630 @005e (einzige
+ // Raumdaten neben RM_5680): Wand 3 attr 3, prm 0/0/255/255, type 7. Erwartung aus den Skriptbytes, nicht aus world.cpp.
+ {Room r(data,"RM_5630");for(unsigned t=0;t<2;++t)r.tick();
+  const auto before=r.world.debug_walls();check(before.size()>3,"RM_5630 wall 3 missing");
+  const std::vector<std::uint8_t> cmd{0x7b,3,3,0,0,0,255,255,7,0};
+  check(r.world.bind({0x7b,0,0,0,cmd}),"bhWalAtariSet2 not bound");
+  const auto after=r.world.debug_walls();const auto& w=after[3];const auto& o=before[3];
+  check(w.attributes==3u&&w.parameters==std::array<unsigned,4>{0,0,255,255}&&w.type==7u,"bhWalAtariSet2 fields differ from event.c (attr u16, prm0..3, type)");
+  check(w.flags==o.flags&&w.id==o.id&&w.floor==o.floor&&w.position.x==o.position.x&&w.position.y==o.position.y&&w.position.z==o.position.z&&
+        w.extent.x==o.extent.x&&w.extent.y==o.extent.y&&w.extent.z==o.extent.z,"bhWalAtariSet2 touched flg/id/flr_no/position/size");
+  for(std::size_t i=0;i<after.size();++i)if(i!=3)check(after[i].attributes==before[i].attributes&&after[i].type==before[i].type,"bhWalAtariSet2 changed another wall");
+  std::cout<<"RM_5630 bhWalAtariSet2: wall 3 attr/prm/type written, nothing else.\n";}
  // RM_0110 (zombie 4 haelt ein Item): scd1 @06ec bhEtcAtariEnePosSet (0xb3) waehlt aus rom->posp[3..59) den
  // Platz naechst owP[9] des Gegners, zentriert etcp 12 darum und merkt ihn in sys->evt_posno[0]; scd0 @0184
  // bhEtcAtariEvtPosSet (0xb4) stellt Feld 12 und itwp[4] beim Wiederbetreten dort hin. evt_posno ist global
@@ -366,6 +378,14 @@ int main(int argc,char** argv){try{
   check(bind(0x68),"bhLoadWork2 case 0 not bound");
   check(r.world.player_mode()==0x03020107u,"bhLoadWork2 case 0 does not write mode0 7 (event.c:12913)");
   check(r.motion==0x1234&&(r.vm.flags[13][0]&0x10000u)&&(r.vm.flags[14][0]&0x10000u)&&(r.vm.flags[14][0]&0x80u),"bhLoadWork2 case 0 writes beyond mode0 / stflg 0x10000 / flg 0x10000");
+  // event.c:12920-12940 Fall 1: bhCetask->work = ene[enep[v].wrk_no], model_cno bleibt; Fall 2: bhEtask[Byte 3].work =
+  // obwp[Byte 4], dessen model_cno = Byte 5, die aktuelle Task bleibt. Art > 2: kein Fall (Original faellt durch).
+  {EventCommand c{0x68,4,0,0,{0x68,1,2,0,0,0}};r.world.bind({0x68,4,0,0,{0x68,0,0,0,0,0}});const auto before=r.world.task_work(4);
+   check(r.world.bind(c)&&r.world.task_work(4)==std::array<unsigned,4>{1,2,before[2],1},"bhLoadWork2 case 1: work = enemy 2, model_cno must stay");
+   check(r.world.bind({0x68,4,0,0,{0x68,2,0,9,3,5}}),"bhLoadWork2 case 2 not bound");
+   check(r.world.task_work(9)==std::array<unsigned,4>{2,3,5,1},"bhLoadWork2 case 2: bhEtask[9] must get obwp[3] with model_cno 5");
+   check(r.world.task_work(4)==std::array<unsigned,4>{1,2,before[2],1},"bhLoadWork2 case 2 must not change the current task's work");
+   check(!r.world.bind({0x68,4,0,0,{0x68,3,0,0,0,0}})&&r.world.task_work(4)==std::array<unsigned,4>{1,2,before[2],1},"bhLoadWork2 kind 3 must change nothing");}
  }
  auto drawn_enemy_triangles=[](const Room& r){Scene s;r.world.append(s,{},r.scene.cameras.at(0));std::size_t n=0;for(const auto& t:s.triangles)if(t.light_category==1&&t.after_modifiers)++n;return n;};
  std::size_t natural_enemy_triangles=0;

@@ -39,6 +39,10 @@ int main(int argc,char** argv){try{
         const auto* s=neck[0];const unsigned before=f.live();
         f.tick();f.tick(); // Pass 0 -> 1, Pass 1: NikuhenEffect (4 Fetzen)
         const unsigned after_niku=f.live();check(after_niku>=before+4,"Sub356 Pass 1: vier Fleischfetzen");
+        // zonzon.c:768 bhEne_SetNikuhenEffect legt bhEff_Sub362 (effsub4.c:1432) an; im Weltlauf entstehen daraus
+        // ueber bhEff_SetBlood5 (effsub4.c:279) die Kinder 372 und das Halsblut 370 -> 371/373.
+        {const auto chunks=f.effects(362);check(chunks.size()==4,"NikuhenEffect: vier bhEff_Sub362 im Weltlauf");
+         for(const auto* c:chunks)check(c->bl_src==8&&c->bl_dst==3&&(c->stflg&0x20u),"Sub362 im Weltlauf: Blend 8/3, Modelltextur");}
         f.tick();f.tick(); // Pass 2, Pass 3: NeckBloodEffect2(0)
         check(s->mode0==4&&s->ct0==24&&f.live()>after_niku,"Sub356 Pass 3: Halsblut Stufe 0, ct0 24");
         for(int i=0;i<25;++i)f.tick();
@@ -46,6 +50,17 @@ int main(int argc,char** argv){try{
         for(int i=0;i<13;++i)f.tick();
         check(!(s->flg&1u)||s->id!=356u,"Sub356: Stufe 2 und Ende");
         f.no_gaps("ExpHeadEffect2");
+    }
+    {   // Derselbe Ablauf in einem eigenen Raum (die Zeitpruefung oben bleibt ungestoert): bhEff_Sub362 erzeugt ueber
+        // bhEff_SetBlood5 (effsub4.c:279) Kinder 372, NeckBloodEffect2 bhEff_Sub370 mit Kindern 371/373.
+        Fixture f(data);f.tick();auto& z=f.zombie();z.dvx=0;z.dvy=1;z.dvz=0;
+        f.world.run_enemy_callback([&]{recvx_en01_exp_head_effect2(&z,0);});
+        bool blood5=false,fountain=false,children=false;
+        for(int i=0;i<40&&!(blood5&&fountain&&children);++i){f.tick();blood5=blood5||!f.effects(372).empty();fountain=fountain||!f.effects(370).empty();children=children||!f.effects(371).empty()||!f.effects(373).empty();}
+        check(blood5,"Sub362 im Weltlauf: kein bhEff_SetBlood5-Kind 372");
+        check(fountain&&children,"NeckBloodEffect2 im Weltlauf: kein 370 mit Kindern 371/373");
+        f.no_gaps("Kopfplatzen-Kinder");
+        std::cout<<"Kopfplatzen im Weltlauf: 362 -> 372, 370 -> 371/373\n";
     }
     {
         Fixture f(data);f.tick();auto& z=f.zombie();

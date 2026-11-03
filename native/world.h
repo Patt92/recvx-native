@@ -546,6 +546,8 @@ public:
     // ene[n].mlwP->owP[node].mtx[12..14] (event.c:7826 bhEtcAtariEnePosSet).
     // bhCetask->ips[0..3] der Ereignisebene `task` (Interpolationspunkte von Common_controll 26/48/51/52), nur lesend.
     const std::array<std::array<float,3>,4>& task_positions(unsigned task)const{return contexts_.at(task).positions;}
+    // bhEtask[task].work/model_cno als (Art 0 Spieler/1 Gegner/2 Objekt..., Index, model_cno, gesetzt), nur lesend.
+    std::array<unsigned,4> task_work(unsigned task)const{const auto& c=contexts_.at(task);return {c.kind,c.index,c.node,c.work?1u:0u};}
     std::optional<NJS_POINT3> enemy_joint_position(unsigned index,unsigned node)const{const auto m=link_matrix(1,index,node);if(!m)return {};return NJS_POINT3{m->value[12],m->value[13],m->value[14]};}
     // ene[slot].mlwP->owP[node].mtx (pwksub.c:455-457 bhSearchNearEnemy2, player.c:7132-7134
     // bhSetHeadRotation): `slot` ist der Platz in sys->ene (enemy_table), nicht der Raumindex.
@@ -658,6 +660,8 @@ public:
     void control_background();
     void suspend_background(){background_enabled_=false;} // system.c:581/598/613/630/649
     void restore_background(unsigned delay); // sys->bcl_ct + gm_flg 0x8000; does not enable until EOR expiry
+    // effect.c:294 bhDeleteYakkyou: Skriptbefehl 0x6b und Austritt des Item-/Kistentasks (system.c:917).
+    void delete_yakkyou();
     // ROM_WORK.bak_col, kept raw (0xAARRGGBB); effect 138 saves/restores it separately from EOR arming.
     std::uint32_t room_background()const{return room_background_;}
     void set_room_background(std::uint32_t color){room_background_=color;}

@@ -23,6 +23,13 @@ current code, working tree and installed runtime.
 
 ## Working tree and delivery
 
+**Port evidence batch (2026-11-03, working tree):** done now with native evidence and counter-checks: sub1.c GetItem
+review (was unconfirmed; endless stack test), event.c bhWalAtariSet2 (RM_5630 field-exact), bhLoadWork2 cases 1/2,
+effsub4.c 362/370/371-373 (fade per step, child speed, world run in RM_0080), bhEff_Sub398 (RM_3130), effsub1.c bhEff000
+(all launch types). Fixes: item task exit now runs bhDeleteYakkyou (system.c:917, shared with 0x6b); bhEff000 release
+modes 2/5 leave the ef_pol draw list (ef_poln--). port_check_test checks retired-evidence demotion on a fixture ledger
+(the real ledger no longer has unconfirmed entries). Report 83.8 % fully evidenced (623/743). **No commit.**
+
 **More port evidence (2026-11-03, working tree):** hitchk.c bhGetGroundPosition done (native GroundQuery reviewed
 against hitchk.c:3557, wall_collision tests); cut.c:682 cam.ply start now plp->gpy from the ground query
 (RoomWorld::player_ground_height, test camera_free_target C, counter-check red; room entry before the first player pass
@@ -57,9 +64,20 @@ left; Direct3D 12 renderer only listed on Windows (`third_person_camera_mod`, co
 GPU shadow variants not run here (no device in the sandbox): Metal/HLSL compile only on the target, GLSL/HLSL
 syntax checked with glslc. **No commit.**
 
-**GCD texture matching / native mod owners:** two further additive rounds in root
-`mods/` (manifest 4789 → 5005 → 5073; previous assignments preserved, backups
-`build/validation/gcd-alpha-install-backup/`, `gcd-claimed-install-backup/`).
+**GCD texture matching / native mod owners:** five further additive rounds in root
+`mods/` (manifest 4789 → 5005 → 5073 → 5380 → 5384 → 5415; previous assignments preserved, backups
+`build/validation/gcd-alpha-install-backup/`, `gcd-claimed-install-backup/`,
+`gcd-claimed3-install-backup/`, `gcd-claimed4-install-backup/`, `gcd-claimed5-install-backup/`).
+Round 5 (`indistinguishable_candidates`: a runner-up original that is ≥ .95 similar to the best
+one and closer to it than the pack image is no longer a competing identity): 31 targets
+(14 rooms, 12 room-items, 8 items, 3 npcs, 2 objects, 1 effect), sheet `gcd-rest/claimed5-1.jpg`
+viewed; round 6 fixpoint check adds nothing beyond the 9 PSNR < 20 hold-backs. Round 4 (fixpoint
+iteration with the 307 round-3 claims, `gcd-claimed4.json`): 13 selectable, of which 9 are
+the round-3 PSNR < 20 hold-backs again (held back again) and 4 new targets installed
+(`gcd-rest/claimed4-1.jpg` viewed); the fixpoint is reached, no further claims change the outcome. Round 3 (`--claimed` with manifest plus tier-passing
+table entries, cross-size gap rule PSNR 23..26 with lead ≥ .25, `--skip-sources`,
+2 niced workers): 307 targets installed, 9 held back at PSNR < 20; 7 review sheets
+`gcd-rest/claimed3-*.jpg` viewed; RM_5640 90 HD via starter.
 Round 1 `match_hd_textures.py --alpha-mask`: premultiplied search and visible-texel
 verification (216 targets: 97 rooms, 30 npcs, 27 effects, 18 objects, 14 room-items,
 14 file wallpapers, 11 items, 3 fonts, 2 computer). Round 2 `--claimed`: originals already
@@ -67,9 +85,9 @@ taken by a better-fitting pack file no longer compete (68 targets, 3 held back a
 `eliminated` evidence in the manifest). Dihedral transforms (flip/rotate/transpose) were
 tested and give no real matches. All new images verified against source RGB and
 original alpha (`gcd-alpha-verify.py`); contact sheets in `build/validation/gcd-rest/`
-viewed. Starter: RM_1050 102 HD instead of 88, RM_0110 99 instead of 98. 958 DDS still
-unresolved (500 near-identical variants, 253 colour variants, 167 cross-size, 35 alpha
-evidence, 3 held back); no GameCube image on disk for exact identity. Computer/file/
+viewed. Starter: RM_1050 102 HD instead of 88, RM_0110 99 instead of 98. 616 DDS still
+unresolved (251 colour variants, 172 near-identical variants, 142 cross-size, 36 alpha
+evidence, 9 held back); no GameCube image on disk for exact identity. Computer/file/
 palette owner bindings remain in the working tree build, not in the starter app. No
 full-pack visual or gameplay acceptance; Windows/GPU unchecked.
 

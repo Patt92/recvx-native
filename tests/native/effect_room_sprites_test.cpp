@@ -339,6 +339,32 @@ static void cartridge_case(){
     for(unsigned pass=0;pass<400&&s.flg;++pass){step_effect_sprite(s,c,&queued);sounds+=unsigned(take_effect_output().room_sounds.size());}
     check(!s.flg,"bhEff000 never released after settling");
     check(sounds>=1&&sounds<=2,"CallYakkyouSe(262) must run for ct0 0 and 1 only");
+    // effsub1.c:350/460: die Abbauzweige (mode0 2 ohne zn, mode0 5) nehmen den Satz mit sys->ef_poln-- wieder aus der
+    // Zeichenliste sys->ef_pol, in die er am Anfang desselben Aufrufs kam: kein Polygon fuer einen freigegebenen Satz.
+    for(unsigned mode:{2u,5u}){EffectSpawn sp;sp.id=0;sp.type=0;sp.flg=1;sp.flr_no=3;sp.position={0,5,0};EffectSprite t;initialize_effect_sprite(t,sp);
+        t.mode0=mode;t.zn=0;step_effect_sprite(t,c,&queued);
+        check(!t.flg&&!t.polygon_queued,mode==2?"bhEff000 mode 2 release keeps the ef_pol entry (ef_poln--)":"bhEff000 mode 5 release keeps the ef_pol entry (ef_poln--)");}
+    // effsub1.c:255 Init aller Typen (mdlver 0: 0/1/2/3/10, mdlver != 0) aus den Originalformeln mit derselben
+    // rand()-Folge; danach der erste Flugschritt (:345-351): yn -= 0.04 ohne Wasser.
+    struct Want{unsigned type,mdlver;};
+    for(const auto w:{Want{1,0},Want{2,0},Want{3,0},Want{10,0},Want{0,2}}){
+        recvx_core_random_seed(7);float r[5];for(auto& v:r)v=-recvx_core_random_next()/-2.1474836e9f;
+        recvx_core_random_seed(7);
+        EffectSpawn sp;sp.id=0;sp.type=w.type;sp.mdlver=w.mdlver;sp.flg=1;sp.flr_no=3;sp.position={1,5,2};sp.ay=4096;EffectSprite t;initialize_effect_sprite(t,sp);
+        check(step_effect_sprite(t,c,&queued),"bhEff000 type not dispatched");
+        float yn=0,zn=0,x=1,y=5,z=2;int ayp=4096,ax=0;
+        const auto yaw=[](float base,float spread,float half,float rv){return 4096-(int(182.04445f*(base+((spread*rv)-half)))&0xFFFF);};
+        if(w.mdlver){yn=0.1f*r[0];zn=0.3f+0.1f*r[1];ayp=yaw(105,12,6,r[2]);}
+        else switch(w.type){
+            case 1:yn=0;zn=0.3f+0.1f*r[0];ayp=yaw(110,16,8,r[1]);break;
+            case 2:yn=0.1f*r[0];zn=0.7f+0.1f*r[1];ayp=yaw(100,16,8,r[2]);break;
+            case 3:yn=0.2f+0.1f*r[0];zn=1.0f+0.1f*r[1];ayp=yaw(90,16,8,r[2]);break;
+            case 10:x+=0.2f*r[0]-0.1f;y-=0.2f*r[1];z+=0.2f*r[2]-0.1f;yn=-(0.1f+0.2f*r[3]);zn=0;ax=16384;ayp=4096;break;}
+        x-=zn*njSin(ayp);z-=zn*njCos(ayp);y+=yn;
+        check(t.ayp==ayp&&close(t.zn,zn)&&close(t.yn,yn-0.04f),w.mdlver?"bhEff000 mdlver != 0 launch differs":w.type==1?"bhEff000 type 1 launch differs":w.type==2?"bhEff000 type 2 launch differs":w.type==3?"bhEff000 type 3 launch differs":"bhEff000 type 10 launch differs");
+        check(close(t.px,x)&&close(t.py,y)&&close(t.pz,z),"bhEff000 first flight step after launch differs");
+        if(w.type==10)check(t.ax==ax-(int(182.04445f*(20.0f*zn))&0xFFFF),"bhEff000 type 10: ax 16384 vor dem ersten Schritt");
+    }
 }
 // effsub0.c:136-1106 — Erzeuger 150/152/154/156/158/160/162/164 der Handfassung
 // (native/effect_sprite_procedures.cpp): Auftrag aus mode1, unsichtbar, Anforderung
@@ -2302,6 +2328,8 @@ static void head_burst_effects(){
     NJS_MATRIX matrix;njUnitMatrix(&matrix);njRotateY(&matrix,16384);matrix[12]=10;matrix[13]=20;matrix[14]=30;
     const unsigned ids[11]={371,371,371,371,371,371,373,373,373,0,373};
     const int lm[11]={0,0,0,1,0,1,1,1,0,2,2},wait[11]={4,4,4,4,2,3,4,3,2,3,3};
+    // effsub4.c:2239 eff370_tbl spd/e/g je Typ (nur Daten); :2366-2369 shp_ct = spd + 0.3 * (-rand() / -2.1474836E9f), aox = e, aoy = g.
+    const float spd370[11]={.5f,.3f,.2f,.7f,.25f,.5f,.7f,.5f,.5f,0,.5f},e370[11]={.98f,.98f,.98f,.98f,.98f,.98f,.98f,.98f,.97f,0,.98f},g370[11]={-.02f,-.02f,-.04f,-.04f,-.03f,-.03f,-.04f,-.03f,-.05f,0,-.03f};
     for(unsigned type=0;type<11;++type){
         EffectWorldHooks hooks;int particles=0;
         hooks.particle=[&](int kind,unsigned index,int node,NJS_POINT3 off,NJS_POINT3 dir,unsigned color,int typ){
@@ -2317,6 +2345,7 @@ static void head_burst_effects(){
         if(type==9){check(particles==1&&out.spawns.empty()&&recvx_core_random_next()==initial,"370 particle path consumed RNG/spawned sprite");}
         else{
             check(out.spawns.size()==1,"370 must emit one child per interval");const auto& child=out.spawns[0];
+            check(child.shp_ct==spd370[type]+0.3f*(-std::int32_t(initial)/-2.1474836E9f)&&child.ao.x==e370[type]&&child.ao.y==g370[type],"370 child shp_ct/aox/aoy differ from effsub4.c:2366-2369");
             check(child.id==ids[type]&&child.ax==12&&child.ay==34&&child.flr_no==-2&&child.has_shp_ct&&child.has_ao,"370 template/child fields differ");
             check(child.mdlver==(type==8?3u:(type==6||type==7)?1u:0u)&&child.type==0&&child.scale.x==3.5f,"370 color/type/scale table differs");
             check(child.link_kind==(lm[type]==0?1:-1)&&child.has_offset==(lm[type]==0),"370 link mode differs");
@@ -2343,7 +2372,13 @@ static void head_burst_effects(){
         step_effect_sprite(s,c,&queued);check(queued&&s.mode0==2&&s.ct1==1,"blood child first active clock differs");
         check(s.tex_id==(id==371?8:5)&&s.ani_ct==(id==371?0:1)&&s.bl_src==8&&s.bl_dst==3,"blood child texture/blend differs");
         if(id==371)check(close(s.lox,10.49f)&&s.px==100,"371 must move local offset, not world origin");
-        int active=1;while(s.flg&&active<25){step_effect_sprite(s,c,&queued);++active;}
+        // effsub4.c:2388/2533/2622 Ausblenden je aktivem Schritt (ct3 ab 1): 371 type 0 ab ct3 > 7 +0xF8000000,
+        // 372 ab ct3 >= 5 +0xD0000000, 373 ab ct3 >= 5 +0xE0000000 (Startfarbe 0xA0C0C0C0 bzw. -1), modulo 2^32.
+        std::uint32_t col=id==371?0xA0C0C0C0u:0xFFFFFFFFu;unsigned ct3=1;
+        const auto fade=[&]{if(id==371?ct3>7:ct3>=5)col+=id==371?0xF8000000u:id==372?0xD0000000u:0xE0000000u;};
+        fade();check(s.tv[0].col==col&&s.tv[3].col==col,"blood child colour after the first active step differs");
+        int active=1;while(s.flg&&active<25){step_effect_sprite(s,c,&queued);++active;++ct3;fade();
+            check(s.tv[0].col==col&&s.tv[1].col==col&&s.tv[2].col==col&&s.tv[3].col==col,id==371?"blood child 371 fade (effsub4.c:2388 ct3 > 7, +0xF8000000) differs":id==372?"blood child 372 fade (effsub4.c:2533 ct3 >= 5, +0xD0000000) differs":"blood child 373 fade (effsub4.c:2622 ct3 >= 5, +0xE0000000) differs");}
         check(!s.flg&&!queued&&active==(id==371?15:id==372?9:11),"blood child finite animation lifetime differs");
     }
     // ef_trs (bhEff_SetSprite mode 0) with 8/3: ALPHA register blend, no depth write.

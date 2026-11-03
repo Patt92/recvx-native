@@ -1011,7 +1011,9 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             else if(menu.active&&menu.task.entering()){if(menu.task.monitor((events->flags[10][0]&0x2u)!=0))recvx::set_back_color(0u);if(menu.task.game_running())recvx::control_screen_fade(events->flags[10][0]);}
             /* sub1.c:3103 ItemTaskCheck: der Abbau ruft bhStandPlayerMotion vor der Kartenwahl
                (flgchk 0x8). Die vier taskloop-Paesse davor zaehlt StatusTask::item_task_check (ui.cpp). */
-            else if(!menu.active&&menu_was_active){if(world)world->restore_background(1);if(!menu.map_requested)fade_set(screen_fade.previous(),3.0f);
+            /* system.c:915-924 bhSysCallItemselect, Abbau (ts_flg 0x200): bhDeleteYakkyou, bhSetScreenFade(fade_pbk, 3),
+               bcl_ct = 1, gm_flg |= 0x8000 (restore_background). */
+            else if(!menu.active&&menu_was_active){if(world){world->delete_yakkyou();world->restore_background(1);}if(!menu.map_requested)fade_set(screen_fade.previous(),3.0f);
                 /* sub1.c:3212-3220: ohne laufende Szene sp_flg = -1; startete die Benutzung eine Szene (bhCineSet 0/3/5,
                    cb_flg 0x4), bleiben Spieler- und Gegnerpass (sp_flg 0x1/0x2) stehen, bis bhCineSet 1/4 sp_flg |= ~0 setzt. */
                 if(!menu.map_requested){if(events->flags[10][0]&4u)events->flags[6][0]|=0xCCu;else events->flags[6][0]=~0u;}if(!box_menu.take_stood())stand_player_motion();} /* Kiste: BoxMenu::leave hat sub1.c:3105 schon im Abbaubild gerufen */

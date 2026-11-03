@@ -28,7 +28,24 @@ class PortCheckTest(unittest.TestCase):
         self.assertTrue(records)
         self.assertFalse(any(record['source'] == 'verweis' for record in records))
         self.assertFalse(any(record['source'] == 'forbidden' for record in records))
-        self.assertTrue(any(record['status'] == 'unbestaetigt' for record in records))
+
+    def test_retired_ledger_evidence_is_demoted(self):
+        # Ein Eintrag mit historischem Extraktions-/Generatorbeleg zaehlt nie als belegt, auch wenn er 'done' traegt.
+        # Eigener Test-Ledger: das echte Ledger muss keinen solchen Eintrag mehr enthalten.
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / 'port_ledger.tsv'
+            ledger.write_text('# test\n'
+                              'event.c:bhRetired\tdone\tOriginal function extracted and generated for the host\n'
+                              'event.c:bhNative\tdone\tNative state machine with a runtime test\n')
+            original = port_check.LEDGER
+            port_check.LEDGER = ledger
+            try:
+                records, _, _ = port_check.classify()
+            finally:
+                port_check.LEDGER = original
+        status = {record['function']: record['status'] for record in records}
+        self.assertEqual(status['bhRetired'], 'unbestaetigt')
+        self.assertEqual(status['bhNative'], 'done')
 
     def test_landing_page_keeps_progress_in_external_report(self):
         status = (ROOT / 'docs/PORT_STATUS.md').read_text()

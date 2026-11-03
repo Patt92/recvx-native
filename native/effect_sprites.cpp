@@ -369,7 +369,7 @@ void step_eff000(EffectSprite& s,const EffectContext& c){
             s.px-=s.zn*njSin(s.ayp);s.pz-=s.zn*njCos(s.ayp);s.zn-=0.01f;
             break;
         }
-        s.flg=0;return;
+        s.polygon_queued=false;s.flg=0;return; // :350 sys->ef_poln-- nimmt den Satz aus der Zeichenliste
     case 3:{
         const float floor=0.1f+effect_ground->query({s.px,s.py,s.pz});
         if(const auto hit=effect_ground->hit();hit&&hit->record&&hit->record->type==6){
@@ -394,7 +394,7 @@ void step_eff000(EffectSprite& s,const EffectContext& c){
         }
         break;}
     case 5:
-        s.flg=0;return;
+        s.polygon_queued=false;s.flg=0;return; // :460 sys->ef_poln--
     }
     if((c.st_flg&0x40)&&!(s.stflg&0x100000)){
         float top=0;

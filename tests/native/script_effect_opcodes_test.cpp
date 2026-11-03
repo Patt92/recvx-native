@@ -169,6 +169,13 @@ int main(int argc,char** argv){try{
     {Fixture f(data,"RM_0030");const auto cmd=f.command(3246,8,0x4a);
      check(cmd[1]==1&&cmd[2]==1&&cmd[3]==18&&cmd[4]==0&&cmd[5]==4,"RM_0030 @3246 record differs");
      yakkyou_check(f,3246,cmd,false,"RM_0030 @3246");
+     // effect.c:294 bhDeleteYakkyou (0x6b und Austritt des Itemtasks, system.c:917): nur flg 0x1 mit id 0 oder 7.
+     {std::vector<unsigned> shells,others;for(unsigned i=0;const auto* e=f.world.effect_state(i);++i)if(e->flg&1u)((e->id==0||e->id==7)?shells:others).push_back(i);
+      check(!shells.empty(),"RM_0030 @3246: no shell work to delete");
+      f.world.delete_yakkyou();
+      for(const auto i:shells)check(!(f.world.effect_state(i)->flg&1u),"bhDeleteYakkyou left a shell work enabled");
+      for(const auto i:others)check(f.world.effect_state(i)->flg&1u,"bhDeleteYakkyou removed a work that is not id 0/7");
+      std::cout<<"bhDeleteYakkyou: "<<shells.size()<<" shell works released, "<<others.size()<<" other works kept.\n";}
      // Diagnoseaufstellung: der zur Raumladezeit festgeschriebene owP-Baum dieses Charakters (id 91) hat
      // eine Null-3x3 (ay waere trivial 0). Mit gesetzten owP[18]/owP[0] werden njCalcPoint, atan2f-Gierwinkel
      // und der Rauchpunkt an einer echten Drehung geprueft; die Befehlsbytes bleiben die des Raumes.

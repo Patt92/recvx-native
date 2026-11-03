@@ -1170,8 +1170,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         if(!event_camera){unbound_enemy_.insert("bhCamPauseSet: cam.mode0 of bhControlActiveCamera (no event camera active)");return true;}
         if(mode==0)event_camera_paused_=true;else{event_camera_paused_=false;event_camera_finished_=false;}return true;}
     if(op==0xca){clear_event_effects();return true;} // event.c:8801 bhEffClearEvt -> effect.c:159 bhClearEventEffect
-    // effect.c bhDeleteYakkyou: release enabled shell works (IDs 0 and 7).
-    if(op==0x6b){for(auto& work:sprites_)if((work.sprite.flg&1)&&(work.sprite.id==0||work.sprite.id==7)){work.sprite.flg=0;work.queued=false;}return true;}
+    if(op==0x6b){delete_yakkyou();return true;} // event.c bhEffDelYakkyou -> effect.c:294 bhDeleteYakkyou
     if(op==0x35){auto& table=v.u8(3)?event_lights_:lights_;const auto index=v.u8(2);if(index>=table.size())throw std::runtime_error("script light outside table");if(v.u8(1))table[index].flags&=~1u;else table[index].flags|=1;return true;}
     if(op==0x4b){const auto index=v.u8(1);if(index>=lights_.size())throw std::runtime_error("script light type outside table");lights_[index].type=v.u8(2);lights_[index].speed=v.u8(3);return true;}
     if(op==0x4c){ // event.c:4067 bhFogColorSet: A,R,G,B then the mode byte; 0 installs sys->fog_col (st_flg 0x100000), else releases it; gm_flg 0x10 re-arms bhControlEOR
@@ -5487,6 +5486,8 @@ void RoomWorld::change_background(bool event){
     set_back_color(color); // RGB and the raw alpha byte as Db.clear; append() reports an alpha the host cannot weight
 }
 std::uint32_t RoomWorld::background_pixel()const{return installed_back_pixel();}
+// effect.c:294 bhDeleteYakkyou: alle eff[512] mit flg 0x1 und id 0 (Huelse) oder 7 (Schrot) auf flg 0.
+void RoomWorld::delete_yakkyou(){for(auto& work:sprites_)if((work.sprite.flg&1)&&(work.sprite.id==0||work.sprite.id==7)){work.sprite.flg=0;work.queued=false;}}
 void RoomWorld::restore_background(unsigned delay){
     background_delay_=delay;
     if(collision_events_)collision_events_->flags[11][0]|=0x8000u;

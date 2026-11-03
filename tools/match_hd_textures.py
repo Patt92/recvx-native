@@ -7,9 +7,11 @@ also compares different original dimensions, verified at the PS2 target size. --
 searches alpha-premultiplied content and verifies only visible pixels (pack alpha and
 original alpha both >= 128), so colour noise under transparent texels no longer hides a
 match; nearly invisible sources must also reproduce the original alpha channel. --claimed
-takes an existing manifest: an original already assigned to a DIFFERENT source with a higher
-score is no longer a competitor (one pack file per original), which resolves sources whose
-best candidates are near-identical variants. Eliminated candidates stay in the result. Candidates
+takes an existing manifest and/or earlier match tables: an original already assigned (or
+best-matched) by a DIFFERENT pack texture with a higher score is no longer a competitor
+(one pack file per original), which resolves sources whose best candidates are near-identical
+variants. Pack files sharing the GameCube texture hash (palette variants) never displace each
+other. Eliminated candidates stay in the result. Candidates
 are compared by image content; a reported candidate is NOT an accepted match.
 Output is a JSON match table, never a modification of data/.
 
@@ -139,8 +141,9 @@ def worker(args):
     scored.sort(key=lambda item: (-item[0], item[1], item[2]))
     # One pack file per original: a candidate already taken by another source that
     # fits it better than this one cannot be this source's identity.
+    own_family = texture_hash(os.path.basename(path))
     eliminated = [item for item in scored if item[2] in claimed
-                  and claimed[item[2]]['dds'] != os.path.basename(path) and claimed[item[2]]['ncc'] > item[0] + CLAIM_MARGIN]
+                  and texture_hash(claimed[item[2]]['dds']) != own_family and claimed[item[2]]['ncc'] > item[0] + CLAIM_MARGIN]
     if eliminated:
         scored = [item for item in scored if item not in eliminated]
         if not scored:
@@ -161,29 +164,25 @@ def worker(args):
     # competing identity. Do not merge colour variants or propagate replacements:
     # only the selected digest is written; all alternates stay in the report.
     ref_best = ps2_pixels(textures_root, best[2], cands)
+    alpha_best = ps2_alpha(textures_root, best[2], cands)
     distinct = []
     equivalent = []
+    indistinguishable = []
     for candidate in scored:
         if candidate[2] == best[2]:
             continue
         ref = ps2_pixels(textures_root, candidate[2], cands)
-        if ref.shape != ref_best.shape:
-            distinct.append(candidate)
-            continue
         alpha_candidate = ps2_alpha(textures_root, candidate[2], cands)
-        alpha_best = ps2_alpha(textures_root, best[2], cands)
-        if alpha_mask:
-            # Variants only coincide where they are visible; masks may differ in isolated texels.
-            ref = ref * (alpha_candidate[..., None] / 255.0)
-            ref_best_compared = ref_best * (alpha_best[..., None] / 255.0)
-            same_alpha = float(np.mean((alpha_candidate >= 128) == (alpha_best >= 128))) >= .995
-        else:
-            ref_best_compared = ref_best
-            same_alpha = np.array_equal(alpha_candidate, alpha_best)
-        colour_delta = float(np.max(np.abs(ref.mean((0, 1)) - ref_best_compared.mean((0, 1)))))
-        rgb_similarity = min(ncc(ref[..., c], ref_best_compared[..., c]) for c in range(3))
-        if ncc(luma(ref), luma(ref_best_compared)) >= .98 and rgb_similarity >= .98 and colour_delta <= 8 and same_alpha:
+        similarity = mutual_similarity(ref, alpha_candidate, ref_best, alpha_best, alpha_mask)
+        if (ref.shape == ref_best.shape and similarity[0] >= .98 and similarity[1] >= .98
+                and similarity[2] <= 8 and similarity[3]):
             equivalent.append(candidate[2])
+        elif (similarity[0] >= INDISTINGUISHABLE and similarity[1] >= INDISTINGUISHABLE and similarity[2] <= 8
+                and similarity[3] and similarity[0] >= best[0]):
+            # The runner-up is closer to the best original than the pack image is:
+            # nothing in the pack can tell the two apart, so it is not competing
+            # evidence against this identity (recorded, never merged or written).
+            indistinguishable.append([candidate[2], round(similarity[0], 4), round(candidate[0], 4)])
         else:
             distinct.append(candidate)
     second = distinct[0] if distinct else None
@@ -201,8 +200,14 @@ def worker(args):
     alpha_layout_ok = not changed_size or alpha_layout_ncc is None or alpha_layout_ncc >= .90
     # Cross-platform scale changes need strong full-size RGB evidence too.
     # A good tiny thumbnail alone must never authorize an unrelated replacement.
-    cross_size_ok = (not changed_size or (best[0] >= .95 and best[3] >= .90
-                     and best[4] <= 15 and psnr >= 26 and alpha_layout_ok))
+    strict_cross = best[0] >= .95 and best[3] >= .90 and best[4] <= 15 and psnr >= 26 and alpha_layout_ok
+    # Pack textures that were already larger on the GameCube lose sharpening when
+    # reduced to the PS2 size (PSNR 23..26); a clear lead over every distinct
+    # runner-up is then the independent evidence instead of the PSNR floor.
+    gap_cross = (best[0] >= .94 and best[3] >= .90 and best[4] <= 15 and psnr >= 23 and alpha_layout_ok
+                 and (second is None or best[0] - second[0] >= CROSS_SIZE_GAP))
+    cross_size_ok = not changed_size or strict_cross or gap_cross
+    cross_size_rule = None if not changed_size else 'strict' if strict_cross else 'gap' if gap_cross else None
     extra = {}
     if eliminated:
         extra['eliminated'] = [[d, round(n, 4), claimed[d]['dds']] for n, _, d, _, _ in eliminated]
@@ -215,11 +220,12 @@ def worker(args):
                       'alpha_full_ncc': round(detail['alpha_full_ncc'], 5) if detail['alpha_full_ncc'] is not None else None,
                       'alpha_ok': bool(alpha_ok)})
     return path, {**extra, 'status': 'ok', 'ps2': best[2], 'ncc': round(best[0], 4), 'psnr': round(float(psnr), 2), 'scale': scale,
-                  'source_size': [w, h], 'target_size': target_size, 'cross_size_ok': bool(cross_size_ok),
+                  'source_size': [w, h], 'target_size': target_size, 'cross_size_ok': bool(cross_size_ok), 'cross_size_rule': cross_size_rule,
                   'alpha_layout_ncc': round(alpha_layout_ncc, 5) if alpha_layout_ncc is not None else None,
                   'ncc2': round(second[0], 4) if second else None,
                   'rgb_ncc': round(best[3], 4), 'mean_delta': round(best[4], 2),
                   'equivalent_candidates': equivalent,
+                  'indistinguishable_candidates': indistinguishable,
                   'colour_ok': best[3] >= .80 and best[4] <= 25,
                   'decisive_rgb': bool(decisive_rgb), 'rgb_error_ratio': round(float(error_ratio), 5),
                   'top': [[d, round(n, 4), round(r, 4), round(md, 2)] for n, _, d, r, md in scored[:4]]}
@@ -228,8 +234,65 @@ def worker(args):
 _PIXELS = {}
 _SEARCH = {}
 _ALPHAS = {}
+FAMILY = re.compile(r'^tex1_\d+x\d+_(?:m_)?([^_.]+)', re.I)
+
+
+def texture_hash(dds_name):
+    """GameCube texture hash of a Dolphin pack file name (palette variants share it)."""
+    found = FAMILY.match(dds_name)
+    return found.group(1) if found else dds_name
+
+
+def load_claims(paths):
+    """digest -> best {'dds', 'ncc'} from manifests (assignments) and match tables (best candidates)."""
+    claims = {}
+    for path in paths:
+        data = json.loads(Path(path).read_text())
+        entries = data['matches'].items() if 'matches' in data and 'ps2' in data else data.items()
+        for key, entry in entries:
+            if not entry or entry.get('status') not in (None, 'ok') or 'dds' not in entry and 'ps2' not in entry:
+                continue
+            if 'matches' in data and 'ps2' in data:
+                # Only a table entry that stands on its own (tools/build_hd_textures.py
+                # tiers) may displace another source; an ambiguous one is no claim.
+                if entry.get('colour_ok') is False or entry.get('cross_size_ok') is False or entry.get('alpha_ok') is False:
+                    continue
+                lead = 1.0 if entry.get('ncc2') is None else entry['ncc'] - entry['ncc2']
+                if not (entry.get('decisive_rgb') or (entry['ncc'] >= .90 and lead >= .05) or (.80 <= entry['ncc'] < .90 and lead >= .15)):
+                    continue
+                digest, dds = entry['ps2'], os.path.basename(key)
+            else:
+                digest, dds = key, entry['dds']
+            if digest not in claims or entry['ncc'] > claims[digest]['ncc']:
+                claims[digest] = {'dds': dds, 'ncc': entry['ncc']}
+    return claims
+
+
+CROSS_SIZE_GAP = .25    # lead over the runner-up that replaces the PSNR floor for changed sizes
 CLAIM_MARGIN = .005     # a claimant must fit the original better than the displaced source by this much
 VISIBLE_MINIMUM = .03   # below this visible fraction the premultiplied image is compared instead
+INDISTINGUISHABLE = .95  # originals at least this similar to each other, and closer than the pack image, do not compete
+
+
+def mutual_similarity(ref, alpha_ref, other, alpha_other, alpha_mask):
+    """(luma ncc, min channel ncc, mean colour delta, same alpha) of two originals.
+
+    Different sizes are compared at the smaller size (box filter); with --alpha-mask
+    the colours are premultiplied and the visibility masks may differ in isolated texels."""
+    if ref.shape != other.shape:
+        size = (min(ref.shape[1], other.shape[1]), min(ref.shape[0], other.shape[0]))
+        ref, other = (np.asarray(Image.fromarray(a.astype(np.uint8)).resize(size, Image.Resampling.BOX), dtype=np.float32)
+                      for a in (ref, other))
+        alpha_ref, alpha_other = (np.asarray(Image.fromarray(a).resize(size, Image.Resampling.BOX)) for a in (alpha_ref, alpha_other))
+    if alpha_mask:
+        ref = ref * (alpha_ref[..., None] / 255.0)
+        other = other * (alpha_other[..., None] / 255.0)
+        same_alpha = float(np.mean((alpha_ref >= 128) == (alpha_other >= 128))) >= .995
+    else:
+        same_alpha = np.array_equal(alpha_ref, alpha_other)
+    delta = float(np.max(np.abs(ref.mean((0, 1)) - other.mean((0, 1)))))
+    channel = min(ncc(ref[..., c], other[..., c]) for c in range(3))
+    return ncc(luma(ref), luma(other)), channel, delta, bool(same_alpha)
 
 
 def premultiply(rgba):
@@ -288,8 +351,10 @@ def ps2_pixels(root, digest, cands):
     key = (str(root), digest)
     if key not in _PIXELS:
         rel = next(c[2] for c in cands if c[0] == digest)
-        _PIXELS[key] = np.asarray(load_rgb(Path(root) / rel), dtype=np.float32)
-    return _PIXELS[key]
+        # Cached as uint8: every worker process ends up holding most originals,
+        # and float32 copies of them exhaust the machine's memory.
+        _PIXELS[key] = np.asarray(load_rgb(Path(root) / rel), dtype=np.uint8)
+    return _PIXELS[key].astype(np.float32)
 
 
 def main():
@@ -301,12 +366,11 @@ def main():
     parser.add_argument('--limit', type=int, default=0, help='first N DDS files (sampling)')
     parser.add_argument('--cross-size', action='store_true', help='also compare different original sizes with the same aspect ratio')
     parser.add_argument('--alpha-mask', action='store_true', help='premultiplied search and visible-pixel verification (see module docstring)')
-    parser.add_argument('--claimed', type=Path, help='hd-manifest.json whose assignments exclude taken originals (see module docstring)')
-    parser.add_argument('--jobs', type=int, default=os.cpu_count() or 4)
+    parser.add_argument('--claimed', type=Path, nargs='+', help='hd-manifest.json and/or match tables whose assignments exclude taken originals (see module docstring)')
+    parser.add_argument('--skip-sources', type=Path, help='hd-manifest.json: DDS already assigned there are not searched again')
+    parser.add_argument('--jobs', type=int, default=min(3, os.cpu_count() or 1), help='worker processes; each caches the originals it touches, keep this small')
     args = parser.parse_args()
-    claimed = {}
-    if args.claimed:
-        claimed = {digest: {'dds': entry['dds'], 'ncc': entry['ncc']} for digest, entry in json.loads(args.claimed.read_text()).items()}
+    claimed = load_claims(args.claimed or [])
     categories = args.categories or sorted(p.name for p in args.textures.iterdir() if p.is_dir() and not p.name.startswith('.'))
     ps2 = index_ps2(args.textures, categories)
     by_size = collections.defaultdict(list)
@@ -317,10 +381,15 @@ def main():
     files = sorted(str(p) for p in args.pack.rglob('*') if p.is_file() and p.suffix.lower() == '.dds')
     if not files:
         raise SystemExit(f'no DDS files under {args.pack} (pack missing or volume not mounted); output left unchanged')
+    results = {}
+    if args.skip_sources:
+        assigned = {entry['dds'] for entry in json.loads(args.skip_sources.read_text()).values()}
+        skipped = [f for f in files if os.path.basename(f) in assigned]
+        files = [f for f in files if os.path.basename(f) not in assigned]
+        results.update((f, {'status': 'assigned-elsewhere'}) for f in skipped)
     if args.limit:
         step = max(1, len(files) // args.limit)
         files = files[::step][:args.limit]
-    results = {}
     with concurrent.futures.ProcessPoolExecutor(args.jobs) as pool:
         jobs = [(f, by_size, str(args.textures), args.cross_size, args.alpha_mask, claimed) for f in files]
         for i, (path, result) in enumerate(pool.map(worker, jobs, chunksize=4), 1):

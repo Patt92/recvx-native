@@ -96,6 +96,10 @@ int main(int argc,char** argv){try{
         }});
     section("D02 GetItem Frage, Nein, Ja, Überlauf",[]{
         {Inventory pickup;unsigned control=0;const auto saved=pickup.items;auto question=pickup.pickup(12,control,0,0);check(question.mode==1&&question.message==157&&!question.granted&&pickup.items==saved,"ordinary pickup skips its question");auto no=pickup.pickup(12,control,0,0,question.mode,101);check(!no.granted&&no.mode==3&&pickup.items==saved,"No grants ordinary pickup");auto yes=pickup.pickup(12,control,0,0,question.mode,100);check(yes.granted&&yes.mode==2&&pickup.slots()[3]==Inventory::pack(12,getbulletmax[12][0]),"confirmed original pickup amount wrong");check(pickup.pickup(12,control,0,0,yes.mode).message==158,"confirmed pickup lacks 158 one pass later");}
+        // sub1.c GetItem Einfuegung: ein Stapel mit bullettype 0x800 (pip & 0x8000000, unendlich) behaelt seine Menge,
+        // traegt das Bit weiter und beendet die Aufnahme (statusflg 0x100); der zweite Stapel dahinter bleibt.
+        {Inventory pickup;pickup.slots()[2]=Inventory::pack(12,50)|0x08000000u;pickup.slots()[3]=Inventory::pack(12,7);unsigned control=0x4000;auto r=pickup.pickup(12,control,0,0);
+         check(r.granted&&pickup.slots()[2]==(Inventory::pack(12,50)|0x08000000u)&&pickup.slots()[3]==Inventory::pack(12,7),"GetItem: endless stack must keep its amount and stop the insertion");}
         {Inventory pickup;pickup.slots()[2]=Inventory::pack(12,990);unsigned control=0x4000;auto r=pickup.pickup(12,control,0,0);check(r.granted&&Inventory::quantity(pickup.slots()[2])==999&&Inventory::quantity(pickup.slots()[3])==getbulletmax[12][0]-9,"original GetItem stack overflow loses rounds");}});
     section("D02 GetItem volle Tasche, Seitentasche",[]{
         Inventory pickup;for(unsigned i=2;i<10;++i)pickup.slots()[i]=Inventory::pack(20,1);const auto saved=pickup.items;unsigned control=0xc000;auto r=pickup.pickup(9,control,0,3);

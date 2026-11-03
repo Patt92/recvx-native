@@ -1,11 +1,12 @@
 """Regression coverage for the optional offline Dolphin texture matcher."""
+import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 import match_hd_textures as matcher
@@ -37,6 +38,31 @@ class MatchHdTexturesTests(unittest.TestCase):
             self.assertEqual(cross['scale'], 4)
             self.assertEqual(cross['ncc'], 1)
             self.assertTrue(cross['cross_size_ok'])
+
+    def test_cross_size_gap_rule_replaces_psnr_floor_only_with_clear_lead(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rng = np.random.default_rng(81)
+            pixels = rng.integers(40, 200, (32, 32, 3), dtype=np.uint8)
+            original = Image.fromarray(pixels)
+            other = Image.fromarray(rng.integers(0, 256, (32, 32, 3), dtype=np.uint8))
+            candidates = self.candidates(root, [original, other])
+            source = root / 'tex1_64x64_soft_14.dds'
+            # Lost sharpening (a larger GameCube original reduced to the PS2 size) is low-frequency.
+            original.filter(ImageFilter.GaussianBlur(0.4)).resize((256, 256), Image.Resampling.NEAREST).save(source)
+            _, result = matcher.worker((str(source), candidates, root, True))
+            self.assertEqual(result['ps2'], '0')
+            self.assertLess(result['psnr'], 26)
+            self.assertGreaterEqual(result['psnr'], 23)
+            self.assertTrue(result['cross_size_ok'])
+            self.assertEqual(result['cross_size_rule'], 'gap')
+            near = Image.fromarray(np.clip(pixels.astype(np.int16) + rng.integers(-20, 21, pixels.shape), 0, 255).astype(np.uint8))
+            candidates = self.candidates(root, [original, near])
+            self.setUp()   # candidate '1' changed on disk: drop cached pixels
+            _, result = matcher.worker((str(source), candidates, root, True))
+            self.assertLess(result['ncc'] - result['ncc2'], matcher.CROSS_SIZE_GAP)
+            self.assertFalse(result['cross_size_ok'])
+            self.assertIsNone(result['cross_size_rule'])
 
     def test_cross_size_does_not_accept_random_same_aspect_image(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -141,6 +167,28 @@ class MatchHdTexturesTests(unittest.TestCase):
             weaker = {'1': {'dds': 'tex1_32x32_other_14.dds', 'ncc': free['ncc'] - .01}}
             _, kept = matcher.worker((str(source), candidates, root, False, False, weaker))
             self.assertEqual(kept['ps2'], '1')
+            palette_variant = {'1': {'dds': 'tex1_32x32_dark_0123456789abcdef_9.dds', 'ncc': 1.0}}
+            _, kept = matcher.worker((str(source), candidates, root, False, False, palette_variant))
+            self.assertEqual(kept['ps2'], '1')   # same GameCube texture hash: not a competitor
+            self.assertNotIn('eliminated', kept)
+
+    def test_load_claims_merges_manifest_and_match_table(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / 'hd-manifest.json'
+            manifest.write_text(json.dumps({'a': {'dds': 'tex1_32x32_1_14.dds', 'ncc': .95, 'tier': 'A', 'ps2': 'rooms/x.tga'}}))
+            table = root / 'matches.json'
+            table.write_text(json.dumps({'ps2': {'a': ['rooms/x.tga'], 'b': ['rooms/y.tga']}, 'matches': {
+                'pack/tex1_32x32_2_14.dds': {'status': 'ok', 'ps2': 'a', 'ncc': .97, 'ncc2': .5},
+                'pack/tex1_32x32_3_14.dds': {'status': 'ok', 'ps2': 'b', 'ncc': .80, 'ncc2': .3},
+                'pack/tex1_32x32_4_14.dds': {'status': 'ok', 'ps2': 'b', 'ncc': .90, 'ncc2': .3},
+                'pack/tex1_32x32_6_14.dds': {'status': 'ok', 'ps2': 'b', 'ncc': .99, 'ncc2': .98},   # ambiguous: no claim
+                'pack/tex1_32x32_7_14.dds': {'status': 'ok', 'ps2': 'b', 'ncc': .99, 'ncc2': .5, 'colour_ok': False},
+                'pack/tex1_32x32_5_14.dds': {'status': 'no-size'}}}))
+            claims = matcher.load_claims([manifest, table])
+            self.assertEqual(claims, {'a': {'dds': 'tex1_32x32_2_14.dds', 'ncc': .97}, 'b': {'dds': 'tex1_32x32_4_14.dds', 'ncc': .90}})
+            self.assertEqual(matcher.texture_hash('tex1_512x512_05ffbe0a83ca28cd_c70b769b5c4666a7_9.dds'), '05ffbe0a83ca28cd')
+            self.assertEqual(matcher.texture_hash('tex1_64x64_m_example_14.dds'), 'example')
 
     def candidates(self, root, images):
         values = []
@@ -169,6 +217,32 @@ class MatchHdTexturesTests(unittest.TestCase):
             self.assertIn('1', result['equivalent_candidates'])
             self.assertTrue(result['colour_ok'])
             self.assertLess(result['ncc2'], .9)
+
+    def test_indistinguishable_runner_up_does_not_compete(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rng = np.random.default_rng(11)
+            pixels = rng.integers(40, 200, (32, 32, 3), dtype=np.int16)
+            base = Image.fromarray(pixels.astype(np.uint8))
+            # A room variant of the same picture: closer to the base than the pack image is.
+            variant = Image.fromarray((pixels + rng.integers(-25, 26, pixels.shape)).clip(0, 255).astype(np.uint8))
+            other = Image.fromarray(rng.integers(0, 256, (32, 32, 3), dtype=np.uint8))
+            candidates = self.candidates(root, [base, variant, other])
+            source = root / 'tex1_32x32_example_14.dds'
+            pack = (pixels + rng.integers(-40, 41, pixels.shape)).clip(0, 255).astype(np.uint8)
+            Image.fromarray(pack).resize((128, 128), Image.Resampling.NEAREST).save(source)
+            _, result = matcher.worker((str(source), candidates, root))
+            self.assertEqual(result['ps2'], '0')
+            self.assertEqual(result['equivalent_candidates'], [])
+            self.assertEqual([item[0] for item in result['indistinguishable_candidates']], ['1'])
+            self.assertGreaterEqual(result['indistinguishable_candidates'][0][1], result['ncc'])
+            self.assertLess(result['ncc2'], .5)
+            # The same variant competes again once the pack image fits the base better than the variant does.
+            self.setUp()
+            base.resize((128, 128), Image.Resampling.NEAREST).save(source)
+            _, result = matcher.worker((str(source), candidates, root))
+            self.assertEqual(result['indistinguishable_candidates'], [])
+            self.assertGreater(result['ncc2'], .9)
 
     def test_different_alpha_masks_remain_competing_identities(self):
         with tempfile.TemporaryDirectory() as directory:
