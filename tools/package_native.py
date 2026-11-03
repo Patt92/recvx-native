@@ -9,6 +9,12 @@ import subprocess
 import sys
 
 from data_profiles import copy_data
+# Eine Versionsquelle fuer alle Pakete: project(... VERSION) plus Commitzahl (tools/build_native.py).
+import importlib.util as _util
+_spec = _util.spec_from_file_location('build_native', Path(__file__).resolve().parent / 'build_native.py')
+_build_native = _util.module_from_spec(_spec)
+_spec.loader.exec_module(_build_native)
+FULL_VERSION = _build_native.FULL_VERSION
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -112,7 +118,7 @@ def main():
         shutil.copy2(ROOT / "native/resources/app-icon.icns", resources / "app-icon.icns")
         with (contents / "Info.plist").open("wb") as info:
             plistlib.dump({"CFBundleExecutable": "Start", "CFBundleIdentifier": "org.recvx.native", "CFBundleName": "RECVX Native",
-                          "CFBundlePackageType": "APPL", "CFBundleIconFile": "app-icon.icns", "CFBundleVersion": "0.5.0", "CFBundleShortVersionString": "0.5.0", "LSMinimumSystemVersion": "11.0", "NSHighResolutionCapable": True}, info)
+                          "CFBundlePackageType": "APPL", "CFBundleIconFile": "app-icon.icns", "CFBundleVersion": FULL_VERSION, "CFBundleShortVersionString": FULL_VERSION, "LSMinimumSystemVersion": "11.0", "NSHighResolutionCapable": True}, info)
         data_destination = contents / "Resources/data"
         run("codesign", "--force", "--sign", "-", str(frameworks / library_name))
         # Vulkan-Rasterer (renderer = vulkan): MoltenVK als ICD neben die Runtime; gpu_raster_vulkan.cpp oeffnet zuerst

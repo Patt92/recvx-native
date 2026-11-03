@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(recvx_native VERSION 0.5.0 LANGUAGES C CXX)
+project(recvx_native VERSION 0.7.0 LANGUAGES C CXX)
 include(CTest)
 # Die C-Besitzer (native/enemies/*.c, player_*.c) nutzen _Alignas und _Static_assert; MSVC braucht dafuer /std:c11.
 set(CMAKE_C_STANDARD 11)

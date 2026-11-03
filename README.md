@@ -490,7 +490,7 @@ desktop controller page); touch controls do not exist yet.
 **Updates.** A newer IPA installs over the old one and keeps saves, snapshots,
 settings and `Documents/data`, as long as the bundle identifier and the signing
 team stay the same (same sideloader account or the same certificate). The build
-number (`CFBundleVersion`, `0.5.<commit count>`) rises with every commit on
+number (`CFBundleVersion`, `0.7.<commit count>`) rises with every commit on
 `main`; a build without git history gets `.0`, which the bundle check rejects.
 With `--ios-bundle-data` the game data is inside the app and is transferred again
 with every update; without it, `Documents/data` stays.
