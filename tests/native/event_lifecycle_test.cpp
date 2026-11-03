@@ -301,6 +301,22 @@ int main(int argc,char** argv){try{
   Room again(data,"RM_0110",[&](EventVm& vm,RoomWorld& w){w.bind_player_collision(vm);vm.inherit_progress(r.vm);});
   for(unsigned t=0;t<2;++t)again.tick();
   check(again.vm.errors.empty()&&again.vm.evt_posno[0]==want,"sys->evt_posno lost on re-entry or 0xb4 blocked scd0");
+  // Common_controll 51/52 (event.c:9997/10030; RM_0110 @0fee/@0ffe) lesen rom->posp[sys->evt_posno[n]] in ips.
+  // 52: ips[0] = Work-Position (bhLoadWork Gegner 4), ips[1] = posp[evt_posno[0]].
+  // 51: ips[0] = ips[1] = owP[9] des Gegners 4, ips[2] = posp - (posp - owP)/2 mit y = posp.y, ips[3] = owP mit -y.
+  {const auto& p=posp[want];const auto j=r.world.enemy_joint_position(4,9);check(bool(j),"RM_0110 zombie 4 joint 9 unavailable for Common 51");
+   const auto* zw=r.world.state(1,4);check(zw&&zw->enemy_bound,"RM_0110 zombie 4 work unavailable for Common 52");
+   const auto near=[](const std::array<float,3>& a,float x,float y,float z){return std::fabs(a[0]-x)<1e-4f&&std::fabs(a[1]-y)<1e-4f&&std::fabs(a[2]-z)<1e-4f;};
+   check(r.world.bind({0x65,9,0,0,{0x65,1,4,0}}),"bhLoadWork enemy 4 not bound");
+   check(r.world.bind({0x69,9,0,0,{0x69,52,0,0}}),"Common_controll 52 not bound");
+   const auto& ips=r.world.task_positions(9);const auto w=zw->transform.position;
+   check(near(ips[0],w.x,w.y,w.z)&&near(ips[1],p.x,p.y,p.z),"Common 52: ips[0]/ips[1] differ from work position / posp[evt_posno[0]]");
+   check(r.world.bind({0x69,9,0,0,{0x69,51,4,9,0,0}}),"Common_controll 51 not bound");
+   check(near(ips[0],j->x,j->y,j->z)&&near(ips[1],j->x,j->y,j->z)&&near(ips[2],p.x-(p.x-j->x)/2.0f,p.y,p.z-(p.z-j->z)/2.0f)&&near(ips[3],j->x,j->y*-1.0f,j->z),
+         "Common 51: ips differ from event.c:10016-10027");
+   // Gegenprobe: ein evt_posno ausserhalb rom->posp wird gemeldet statt still gelesen.
+   r.vm.evt_posno[1]=0xff;bool threw=false;try{r.world.bind({0x69,9,0,0,{0x69,52,1,0}});}catch(const std::exception&){threw=true;}
+   check(threw,"Common 52 with evt_posno outside rom->posp must not read past the table");}
   const auto item=again.world.position(3,4);check(item&&item->x==posp[want].x&&item->z==posp[want].z,"bhEtcAtariEvtPosSet did not move itwp[4]");
   std::cout<<"RM_0110 bhEtcAtariEnePosSet/EvtPosSet: nearest rom->posp "<<want<<", etcp 12 and itwp[4] follow it on re-entry.\n";}
  // Fresh Enter edges before the FMV: sweep the initial game frames, including

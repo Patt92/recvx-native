@@ -2,7 +2,7 @@
 
 This report counts only native mechanisms with explicit evidence. The complete original decompilation is deliberately neither the denominator nor a list of missing work.
 
-Explicit evidence scope: **91.2 %** weighted, **83.0 %** fully evidenced (615/741 mechanisms; not overall game completion).
+Explicit evidence scope: **91.2 %** weighted, **83.0 %** fully evidenced (616/742 mechanisms; not overall game completion).
 
 Event commands (bhScenarioJmpT): 223/223 bound, 0 consumed only, 0 missing.
 
@@ -11,7 +11,7 @@ Event commands (bhScenarioJmpT): 223/223 bound, 0 consumed only, 0 missing.
 | Enemies/AI | 95/118 | 90.3 % | 80.5 % | 23 | 0 |
 | Effects | 233/251 | 96.4 % | 92.8 % | 18 | 0 |
 | Events/script | 82/97 | 92.3 % | 84.5 % | 15 | 0 |
-| Player/combat | 60/79 | 88.0 % | 75.9 % | 19 | 0 |
+| Player/combat | 61/80 | 88.1 % | 76.2 % | 19 | 0 |
 | Room/camera/door | 26/49 | 76.5 % | 53.1 % | 23 | 0 |
 | Menu/items/text | 48/62 | 85.5 % | 77.4 % | 10 | 4 |
 | Models/animation | 12/18 | 80.6 % | 66.7 % | 5 | 1 |
@@ -41,7 +41,6 @@ Only ledger entries with independent native evidence count. Matching names, orig
 
 ## Unconfirmed historical ledger entries
 
-- `hitchk.c` bhGetGroundPosition: Historical extraction/generator evidence is invalid. The generated ground query kept room/mobile index and live ATR work. Player push/stair binding, linked casing effect, EE random state, and first-free eff[512] mapping were reported; other random consumers, exact EasyLight, full effect lifecycle, and general player work remain open.
 - `sub1.c` GetItem: Historical extraction/generator evidence is invalid. GetItem including branch 153 and subsequent ItemSort were extracted; StatusCancel, sprite transitions, and full StatusMain were not completely bound.
 
 Generated with `python3 tools/port_check.py --markdown docs/PORT_STATUS.md`.

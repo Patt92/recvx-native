@@ -23,6 +23,14 @@ current code, working tree and installed runtime.
 
 ## Working tree and delivery
 
+**More port evidence (2026-11-03, working tree):** hitchk.c bhGetGroundPosition done (native GroundQuery reviewed
+against hitchk.c:3557, wall_collision tests); cut.c:682 cam.ply start now plp->gpy from the ground query
+(RoomWorld::player_ground_height, test camera_free_target C, counter-check red; room entry before the first player pass
+named as open: the original reads the previous room's gpx/gpy/gpz there). Common_controll 51/52 tested in RM_0110
+(event_lifecycle, counter-check red), bhGetCameraPosition/bhMakeCameraVector in the cut fog path (camera_offset,
+counter-check red). Runtime scan 205/205 rooms, 0 blocked commands (build/validation/event-scan-20261103). Headless
+--state reports camera_offset. Report 83.0 % fully evidenced (616/742). **No commit.**
+
 **3rd-person face through the head; port evidence (2026-11-03, working tree):** the faded player (chase camera
 close) now gets a depth-only pre-pass of the same surfaces (`SceneTriangle::depth_only`, CPU + Metal/D3D11/D3D12/
 Vulkan/OpenGL, `ThirdPersonCamera::fade_actor`), so only the nearest surface blends over the room; test in

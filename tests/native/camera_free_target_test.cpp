@@ -20,6 +20,7 @@
 #include "events.h"
 #include "asset_io.h"
 #include "room.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -142,6 +143,26 @@ int main(int argc, char** argv) {
             const auto plx = fx.world.player_camera_point();
             expect(plx.x == kWorkX && plx.z == kWorkZ,
                    "player.c:1657: ohne plp->flg 0x200000 darf der Spielerpass plx/plz nicht schreiben (" + f3(plx.x) + "," + f3(plx.z) + ")");
+        }
+
+        // C) cut.c:682 cam.ply = exp0[25] = plp->gpy + ci->h; gpy = bhGetGroundPosition ab owP[1].mtx[13]
+        //    (player.c:1756-1757). Spieler 9 Einheiten ueber dem Boden: der Startwert folgt dem Boden, nicht plp->py.
+        //    DIAGNOSEVORBEDINGUNG: Knotenmatrizen von Hand (Wurzel und Huefte), kein Spielerpass.
+        {
+            Fixture fx(data, true);
+            fx.actor.position.y = kWorkY + 9.0f;
+            std::vector<BoneMatrix> nodes(2);
+            for(auto& n : nodes){std::fill(std::begin(n.value), std::end(n.value), 0.0f);n.value[0]=n.value[5]=n.value[10]=n.value[15]=1.0f;}
+            nodes[0].value[12] = kWorkX; nodes[0].value[13] = kWorkY + 9.0f; nodes[0].value[14] = kWorkZ;
+            nodes[1].value[12] = kWorkX; nodes[1].value[13] = kWorkY + 17.0f; nodes[1].value[14] = kWorkZ;
+            fx.world.commit_player_joints(nodes);
+            fx.tick();
+            const float ground = fx.world.debug_ground({kWorkX, kWorkY + 17.0f, kWorkZ});
+            const auto start = fx.world.player_camera_point();
+            expect(ground > -1000.0f && ground <= kWorkY + 0.001f, "RM_3080: kein Boden unter der Arbeitslage (" + f3(ground) + ")");
+            expect(start.y == ground, "cut.c:682: cam.ply-Startwert ist nicht plp->gpy = bhGetGroundPosition (" + f3(start.y) + " statt " + f3(ground) + ")");
+            for(const auto& gap : fx.world.unbound_enemy_routines())
+                expect(gap.find("plp->gpy") == std::string::npos, "gpy-Luecke trotz Knoten 1: " + gap);
         }
 
         for(const auto& why : failures) std::fprintf(stderr, "FAIL %s\n", why.c_str());

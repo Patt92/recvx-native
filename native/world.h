@@ -544,6 +544,8 @@ public:
     unsigned frame(unsigned kind,unsigned index)const;
     std::optional<NJS_POINT3> position(unsigned kind,unsigned index)const;
     // ene[n].mlwP->owP[node].mtx[12..14] (event.c:7826 bhEtcAtariEnePosSet).
+    // bhCetask->ips[0..3] der Ereignisebene `task` (Interpolationspunkte von Common_controll 26/48/51/52), nur lesend.
+    const std::array<std::array<float,3>,4>& task_positions(unsigned task)const{return contexts_.at(task).positions;}
     std::optional<NJS_POINT3> enemy_joint_position(unsigned index,unsigned node)const{const auto m=link_matrix(1,index,node);if(!m)return {};return NJS_POINT3{m->value[12],m->value[13],m->value[14]};}
     // ene[slot].mlwP->owP[node].mtx (pwksub.c:455-457 bhSearchNearEnemy2, player.c:7132-7134
     // bhSetHeadRotation): `slot` ist der Platz in sys->ene (enemy_table), nicht der Raumindex.
@@ -1233,9 +1235,12 @@ private:
     // cut.c:681-1033 bhInitActiveCamera: cam.plx/plz und EXP_WORK plx/plz aus plp->gpx/gpz; bei
     // fehlendem owP[0]-Knoten (stflg 0x30 / mode0 7) bleibt das Ziel unveraendert und wird als Luecke gemeldet.
     void init_camera_target(const Scene& stage,std::size_t cut);
-    // plp->gpx/gpz (player.c:1744-1752): owP[0] unter stflg 0x30 oder mode0 7, sonst px/pz. y = plp->py
-    // (gpy = bhGetGroundPosition, :1757, ohne nativen Besitzer). Nicht gebunden: kein Knoten.
+    // plp->gpx/gpz (player.c:1744-1752): owP[0] unter stflg 0x30 oder mode0 7, sonst px/pz; y = plp->py.
+    // Nicht gebunden: kein Knoten 0.
     std::optional<NJS_POINT3> player_ground_point()const;
+    // plp->gpy (player.c:1756-1757): bhGetGroundPosition ab owP[1].mtx[13] am Punkt `ground` ueber Raum- und
+    // bewegliche Waende, ohne sys->htp zu schreiben. Nicht gebunden: kein Knoten 1.
+    std::optional<float> player_ground_height(NJS_POINT3 ground)const;
     // cam.flg 0x8 und sys->fil_no/fil_rt (cut.c:412-421/505-514); bhInitCamera (camera.c:9) nullt cam.flg.
     bool camera_filter_=false;int filter_no_=0,filter_rate_=0;
     bool camera_cut_wall_=false; // cam.flg 0x10 (cut.c:424/517: ci->flg 0x200)

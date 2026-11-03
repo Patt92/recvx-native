@@ -14,6 +14,7 @@
 #include "core_random.h"
 #include "ninja_math.h"
 #include <cmath>
+#include <cstdio>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -131,6 +132,34 @@ int main(int argc,char** argv){try{
         f.camera={4,5,6};e.flg|=0x80000u;e.mode0=5;e.mode1=0;f.tick();
         check(f.camera.x==4&&f.camera.y==5&&f.camera.z==6,"en02.c:3076: mode0 5 laesst cam.of* stehen");
         f.no_camera_gap("EN02");
+    }
+    {
+        // cut.c:1609-1638 Ende von bhControlActiveCamera: ci->flg 0x40/0x80 setzt cam.fog_nr/fog_fr = ci->fog + len*inn mit
+        // cam.wp aus bhGetCameraPosition (camera.c:75: T(cam.p + cam.of) * Ry * Rx * Rz * (0, 0, -cam.ln)) und
+        // cam.v aus bhMakeCameraVector (camera.c:61: R * (0, 0, -1), vx/vy negiert). RM_0030 Schnitt 1 traegt flg 0x1c8.
+        // Erwartung hier neu aus den Originalformeln mit ninja_math, ohne die nativen Zwischenwerte.
+        Fixture f(data,"RM_0030");
+        const auto& ci=f.scene.cameras.at(1);check((ci.flags&0xC0u)==0xC0u,"RM_0030 cut 1 has no fog-follow flags");
+        f.camera={3.5f,-1.25f,2.0f}; // DIAGNOSEVORBEDINGUNG: cam.ofx/ofy/ofz wie nach einem Schreiber
+        // game.c:53-58: bhCheckCut/bhControlActiveCamera (tick_camera), dann bhControlCamera (control_camera); der
+        // zweite bhControlActiveCamera liest cam.wp/cam.v aus dem ersten bhControlCamera.
+        f.world.tick_camera(f.scene,ci,1);f.world.control_camera(f.scene,ci);
+        const auto cam=f.world.camera(f.scene,ci); // Lage des bhControlCamera, die der naechste Pass liest
+        f.world.tick_camera(f.scene,ci,1);
+        NJS_MATRIX m;njUnitMatrix(&m);njTranslate(&m,cam.position.x,cam.position.y,cam.position.z);
+        njRotateY(&m,cam.angles[1]);njRotateX(&m,cam.angles[0]);njRotateZ(&m,cam.angles[2]);
+        NJS_POINT3 ps{0,0,-cam.distance},wp;njCalcPoint(&m,&ps,&wp);
+        NJS_MATRIX r;njUnitMatrix(&r);njRotateY(&r,cam.angles[1]);njRotateX(&r,cam.angles[0]);njRotateZ(&r,cam.angles[2]);
+        NJS_VECTOR back{0,0,-1.0f},v;njCalcVector(&r,&back,&v);v.x=-v.x;v.y=-v.y;
+        NJS_VECTOR sca{wp.x-ci.position.x,wp.y-ci.position.y,wp.z-ci.position.z};const float len=std::sqrt(sca.x*sca.x+sca.y*sca.y+sca.z*sca.z);
+        njUnitVector(&sca);const float inn=len!=0.f?v.x*sca.x+v.y*sca.y+v.z*sca.z:1.0f;
+        const auto fog=f.world.fog_view();
+        check(std::fabs(fog.near_range-(ci.fog_near+len*inn))<1e-3f&&std::fabs(fog.far_range-(ci.fog_far+len*inn))<1e-3f,
+              "cut.c:1609-1638: cam.fog_nr/fog_fr differ from bhGetCameraPosition/bhMakeCameraVector");
+        // cam.of* geht in cam.wp ein (camera.c:81): ein anderer Versatz verschiebt len*inn.
+        f.camera={-6.0f,4.0f,-3.0f};f.world.control_camera(f.scene,ci);f.world.tick_camera(f.scene,ci,1);
+        check(std::fabs(f.world.fog_view().near_range-fog.near_range)>1e-3f,"cam.ofx/ofy/ofz must enter bhGetCameraPosition");
+        std::printf("RM_0030 cut 1: fog follows cam.wp (len %.3f, inn %.4f)\n",len,inn);
     }
     std::cout<<"camera offset writers (event 0x5a, EN17, EN02, Reihenfolge Gegner/Effekt) PASS\n";return 0;
 }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}}

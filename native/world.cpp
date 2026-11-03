@@ -1795,7 +1795,7 @@ if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign
             if(ctx.kind==1&&e.enemy_bound){auto& w=e.enemy;if(axis==0)w.px=pos.x;else if(axis==1)w.py=pos.y;else w.pz=pos.z;}
             return true;}
         // Common_controll 51/52 (event.c:9997/10030) lesen rom->posp[sys->evt_posno[n]]; evt_posno
-        // schreibt allein bhEtcAtariEnePosSet (Opcode 0xb3, event.c:7794), das der Host nicht fuehrt.
+        // schreibt allein bhEtcAtariEnePosSet (Opcode 0xb3, event.c:7794) auf dem EventVm (events.cpp).
         if(cmd==51||cmd==52){
             if(!collision_events_){unbound_enemy_.insert("Common_controll 51/52: sys->evt_posno ohne EventVm");return false;}
             const auto& posp=collision_events_->room_positions();const auto& evt=collision_events_->evt_posno;
@@ -4269,7 +4269,7 @@ std::optional<unsigned> RoomWorld::put_model_mdflg(const Model& model,const Worl
 std::optional<NJS_POINT3> RoomWorld::player_ground_point()const{
     // player.c:1744-1752: plp->gpx/gpz = owP[0].mtx[12]/[14] unter stflg 0x30 oder mode0 7, sonst px/pz.
     // Das Original schreibt sie am Ende jedes Spielerpasses im Tor :1365; der Host liest den letzten
-    // veroeffentlichten Knoten. gpy (bhGetGroundPosition, :1757) hat keinen nativen Besitzer: y = plp->py.
+    // veroeffentlichten Knoten. y bleibt plp->py; gpy liefert player_ground_height.
     const unsigned stflg=collision_events_?collision_events_->flags[14][0]:collision_status_;
     NJS_POINT3 gp=player_.position;
     if((stflg&0x30u)||(collision_mode_&0xffu)==7u){const auto root=link_matrix(0,0,0);
@@ -4277,18 +4277,31 @@ std::optional<NJS_POINT3> RoomWorld::player_ground_point()const{
         gp.x=root->value[12];gp.z=root->value[14];}
     return gp;
 }
+std::optional<float> RoomWorld::player_ground_height(NJS_POINT3 ground)const{
+    // player.c:1756-1757: gpy = owP[1].mtx[13], dann bhGetGroundPosition(&gpx) ueber rom->walp und sys->mwalp
+    // (Tabellenfolge wie update_ground_geometry). Nur der Wert: sys->htp schreibt allein der Spielerpass.
+    if(player_joint_matrices_.size()<2)return std::nullopt; // vor dem ersten bhCalcModel(plp) bzw. ohne Knoten 1
+    ground.y=player_joint_matrices_[1].value[13];
+    return original_ground_position(collision_geometry(),room_height_,ground);
+}
 void RoomWorld::init_camera_target(const Scene& stage,std::size_t cut){
     // cut.c:681/683: cam.plx = exp0[24] = plp->gpx, cam.plz = exp0[26] = plp->gpz; :684 bhCheckCutAttribute(gpx, gpz,
     // plp->flr_no). Die Bloecke :687-1033 ueberschreiben cam.plx/plz (Naehpunkt oder gpx/gpz), nicht exp0[24]/[26].
     if(cut>=stage.cameras.size())return;
     const auto gp=player_ground_point();
     if(!gp){unbound_enemy_.insert("cut.c:681 bhInitActiveCamera: plp->gpx (owP[0]) ohne nativen Knoten");return;}
-    player_camera_point_={gp->x,gp->y,gp->z};
+    // :682 cam.ply = exp0[25] = plp->gpy + ci->h (ci->h addiert camera_for_actor).
+    // Beim Raumeintritt (bhSetPlayer player.c:842 bhCheckCut(1) vor dem ersten Spielerpass) liest das Original
+    // gpx/gpy/gpz des letzten Spielerpasses im vorigen Raum; nativ gibt es dann noch keinen Knoten, y bleibt
+    // plp->py (benannte Luecke im Ledger cut.c:bhControlActiveCamera, keine Laufzeitmeldung).
+    auto ground=*gp;if(const auto gpy=player_ground_height(ground))ground.y=*gpy;
+    else if(!player_joint_matrices_.empty())unbound_enemy_.insert("cut.c:682 bhInitActiveCamera: plp->gpy (owP[1]) ohne nativen Knoten");
+    player_camera_point_={ground.x,ground.y,ground.z};
     // cut.c:300-304 bhSetCut: ohne gm_flg 0x1 cam.attr = bhCheckCutAttribute(gpx, gpz, flr_no) fuer den neuen
     // Schnitt; :685 bhInitActiveCamera liest denselben Wert (bzw. bei Fehltreffer cam.attr).
     if(!collision_events_||!(collision_events_->flags[11][0]&0x1u))cam_attr_=cut_attribute(stage,cut,gp->x,gp->z,collision_floor_,cam_attr_);
     const auto attr=cut_attribute(stage,cut,gp->x,gp->z,collision_floor_,cam_attr_);
-    (void)camera_for_actor(stage,cut,*gp,std::int8_t(collision_floor_),nullptr,&camera_target_,&attr);
+    (void)camera_for_actor(stage,cut,ground,std::int8_t(collision_floor_),nullptr,&camera_target_,&attr);
     camera_target_valid_=true;
 }
 void RoomWorld::check_player_mirror_floor(int flr_no){
@@ -5347,9 +5360,11 @@ void RoomWorld::control_eye_camera(const Scene& stage,std::size_t cut,bool hold)
             // EXP_WORK plx/plz bleiben danach auf dem Stand des letzten Blocks stehen.
             const auto gp=player_ground_point();
             if(!gp)unbound_enemy_.insert("cut.c:2574 bhInitActiveCamera: plp->gpx (owP[0]) ohne nativen Knoten");
-            const auto aim_at=gp?*gp:player_.position;const auto attr=cut_attribute(stage,cut,aim_at.x,aim_at.z,collision_floor_,cam_attr_); // :685, ohne Speichern
+            auto aim_at=gp?*gp:player_.position; // :682 cam.ply = gpy + ci->h
+            if(gp){if(const auto gpy=player_ground_height(aim_at))aim_at.y=*gpy;else if(!player_joint_matrices_.empty())unbound_enemy_.insert("cut.c:682 bhInitActiveCamera: plp->gpy (owP[1]) ohne nativen Knoten");}
+            const auto attr=cut_attribute(stage,cut,aim_at.x,aim_at.z,collision_floor_,cam_attr_); // :685, ohne Speichern
             const auto aimed=camera_for_actor(stage,cut,aim_at,std::int8_t(collision_floor_),nullptr,gp?&camera_target_:nullptr,&attr);
-            if(gp){camera_target_valid_=true;player_camera_point_={gp->x,gp->y,gp->z};}
+            if(gp){camera_target_valid_=true;player_camera_point_={aim_at.x,aim_at.y,aim_at.z};}
             eye_.axp=aimed.angles[0];eye_.ayp=aimed.angles[1];eye_.azp=aimed.angles[2];eye_.target=aimed.position;eye_.pln=aimed.distance;eye_.ppers=aimed.perspective;
             eye_.mode0=2;eye_.ct0=0;}
         break;
