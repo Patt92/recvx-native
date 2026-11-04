@@ -2,14 +2,14 @@
 
 This report counts only native mechanisms with explicit evidence. The complete original decompilation is deliberately neither the denominator nor a list of missing work.
 
-Explicit evidence scope: **91.6 %** weighted, **83.9 %** fully evidenced (624/744 mechanisms; not overall game completion).
+Explicit evidence scope: **91.7 %** weighted, **84.1 %** fully evidenced (626/744 mechanisms; not overall game completion).
 
 Event commands (bhScenarioJmpT): 223/223 bound, 0 consumed only, 0 missing.
 
 | Area | Mechanisms | Evidence scope | Fully evidenced | Partial | Open |
 |---|---:|---:|---:|---:|---:|
-| Enemies/AI | 95/118 | 90.3 % | 80.5 % | 23 | 0 |
-| Effects | 238/251 | 97.4 % | 94.8 % | 13 | 0 |
+| Enemies/AI | 96/118 | 90.7 % | 81.4 % | 22 | 0 |
+| Effects | 239/251 | 97.6 % | 95.2 % | 12 | 0 |
 | Events/script | 84/97 | 93.3 % | 86.6 % | 13 | 0 |
 | Player/combat | 62/81 | 88.3 % | 76.5 % | 19 | 0 |
 | Room/camera/door | 26/49 | 76.5 % | 53.1 % | 23 | 0 |

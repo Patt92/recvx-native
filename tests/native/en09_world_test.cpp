@@ -64,6 +64,38 @@ int main(int argc,char** argv){try{
         check(!(e.flg&4)&&e.dam[4]==0,"damage flags not cleared at end of enemy pass");
     }
     {
+        // en09.c:5420-5449 bhEne09_PlyDG00 Bild 70 (toedlicher Griff): drei bhSetEffParticle(plp,
+        // 5, (0,0.5,0), pd, 0xFF5F0000, 12) und bhSetEffectTb id 5 type 2 (s 2,2,0) an Spielergelenk 5.
+        // ORIGINAL-FIX: pd ist im Original Stapelrest, nativ 0 (Regel 4). Vorbedingung ist der Stand
+        // nach erfolgreichem en09.c:4964 bhEne09_NageCheck im toedlichen Zweig (en09_mv_grab).
+        Fixture f(data);auto& e=f.enemy();auto* exp=static_cast<RECVX_EN09_EXT*>(e.exp0);
+        f.world.set_enemy_grab(true);
+        RECVX_ENEMY_PLAYER pl{};check(f.world.enemy_player_get(pl),"player view missing");
+        pl.mode0=6;pl.mode1=0;pl.mode2=0;pl.mode3=0;pl.flg=(pl.flg&~0x10u)|0x10004u;
+        check(f.world.enemy_player_set(pl),"player_set rejected");
+        e.mode0=2;e.mode1=e.mode2=e.mode3=0;exp->state|=0x04400000u;e.flg2|=1;
+        auto count=[&](auto pred){unsigned n=0;for(unsigned i=0;i<512;++i){const auto* s=f.world.effect_state(i);if(s&&(s->flg&3)&&pred(*s))++n;}return n;};
+        auto particle=[](const EffectSprite& s){return s.id==302;};
+        auto flash=[](const EffectSprite& s){return s.id==5&&s.type==2&&(s.flg&0x80)&&s.link_kind==0&&s.lkono==5&&
+            s.sxb==2.0f&&s.syb==2.0f&&s.szb==0.0f&&s.lox==0.0f&&s.loy==0.5f&&s.loz==0.0f;};
+        bool seen=false;int frame70=-1;
+        for(int i=0;i<200&&!seen;++i){
+            check(f.world.enemy_player_get(pl),"player view missing");const int before=pl.frm_no>>16;const unsigned mode3=pl.mode3;
+            const unsigned p0=count(particle),s0=count(flash);
+            f.tick();
+            const unsigned p1=count(particle),s1=count(flash);
+            if(s1>s0){seen=true;frame70=before;
+                check(mode3==1,"frame-70 effects outside PlyDG00 mode3 1");
+                check(s1==s0+1,"bhSetEffectTb id 5 type 2 not exactly once");
+                // PtclTbl[12] hat zwei Saetze: drei Aufrufe legen sechs Wurzeln (id 302) an.
+                check(p1>=p0+6,"three bhSetEffParticle(type 12) did not create six particle roots");}
+        }
+        std::cout<<"PlyDG00 frame-70 effects at player frame "<<frame70<<"\n";
+        check(seen,"bhEne09_PlyDG00 frame 70: particles/effect never created (gap instead of port)");
+        check(frame70==70,"bhEne09_PlyDG00 effects not at player frame 70");
+        for(const auto& g:f.world.unbound_enemy_routines())check(g.find("PlyDG00")==std::string::npos,g.c_str());
+    }
+    {
         // event.c:12053 Common_controll 7 setzt work->flr_no = bhCheckFloorNum(py);
         // der folgende Sub_controll 0x8f (bhLoadWork-Uebernahme) darf die Etage
         // der Raumtabelle (RM_2000 EN09 #1: flr_no -1, py -36) nicht zuruecklegen.

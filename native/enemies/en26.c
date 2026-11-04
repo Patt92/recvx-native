@@ -1259,8 +1259,20 @@ static void en26_player_link(RECVX_ENEMY_WORK* w)
         else if ((int32_t)pl.mtn_no == base + 4) mtn_no = 2;          /* :1721-1724 */
         else if ((int32_t)pl.mtn_no == base + 5) mtn_no = 3;          /* :1725-1728 */
         else {
-            /* Kein else im Original: mtn_no bleibt die nicht initialisierte
-               Stackvariable (en26.c:1682/:1730). */
+            /* Kein else im Original: mtn_no bleibt unbestimmt (en26.c:1682/:1730).
+               ELF: mtn_no ist $s0; bhEne26_PlayerLink (0x20b9f0) setzt es nur in den
+               Treffern (0x20bae4/0x20baf8/0x20bb0c/0x20bb1c), der Fehlfall springt bei
+               0x20bb14 nach 0x20bb24 und nimmt das $s0 des einzigen Aufrufers bhEne26
+               (= epw, 0x2096e0) als Index in ply_pos[16]: Lesen weit ausserhalb
+               (QUALITY.md Kriterien 1/2 erfuellt). Erreichbarkeit (Kriterium 3) nicht
+               belegt: plp->flg 0x1000 setzt nur bhEne01_PlyDG01 (en01.c:7804/:7949);
+               geloescht wird es dort beim Loslassen (:7929), in bhCPM2_act_std
+               (player.c:2103/2107) und bhSetPlayer (player.c:691). EN26 setzt es nie,
+               seine Griffmotionen sind Offset+6..+13 (en26.c:2801-2943), nie +1/+2/+4/
+               +5. Der Zweig liefe also nur mit einem von EN01 liegengelassenen Bit
+               (etwa Loslassen durch Treffer en01.c:3275-3306 und Griff von EN26 MV05
+               im selben Bild, en26.c:2354-2361); eine Schadensquelle fuer einen
+               greifenden EN01 neben EN26 ist nicht belegt. Deshalb kein Fix, Luecke. */
             en26_gap(w, "bhEne26_PlayerLink: mtn_no unbestimmt (en26.c:1730)");
             return;
         }

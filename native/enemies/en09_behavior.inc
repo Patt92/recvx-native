@@ -353,7 +353,36 @@ static void en09_player_grab(RECVX_ENEMY_WORK* epw,RECVX_ENEMY_PLAYER* plp){
     int f=plp->frm_no>>16;
     if(lethal){
         if(plp->mode3==1){if(f==71)recvx_t3_player_se_play(epw,0x402);else if(f==105||f==114)en09_se_play(epw,0x230d);
-            if(f==70)en09_gap(epw,"bhEne09_PlyDG00: Partikelrichtung pd ungeklaert (Originaldisassembly)");
+            if(f==70){
+                /* en09.c:5420-5449: plp->djnt_no = 5; dreimal bhSetEffParticle(plp, 5, &ps, &pd,
+                   0xFF5F0000, 12) mit ps = (0, 0.5, 0); dann sys->ef = {flg 1, p 0, s (2,2,0), ay 0,
+                   mdlver 0, id 5, type 2} und bhSetEffectTb(&sys->ef, &ps, plp, plp->djnt_no).
+                   sys->ef.ax schreibt die Routine nicht; bhEff005 setzt flg |= 0x100000, und
+                   bhDrawTrsEffect3D (effect.c:1357) verwirft dann mit njUnitRotPortion jede Drehung,
+                   ax bleibt ohne Wirkung (Basis 0 wie zonzon.c:501/en03_lib.c:1493).
+                   ORIGINAL-FIX (QUALITY.md): en09.c:5341/5428-5430, `NJS_POINT3 pd` wird nie
+                   beschrieben. Disassembly bhEne09_PlyDG00 (0x1CD560, Rahmen 0x70): pd liegt bei
+                   sp+0x50 und geht bei 0x1CD84C/0x1CD878/0x1CD898 als dirP ($a3) an bhSetEffParticle;
+                   die Routine schreibt nur sp+0x00..0x4F (Registersicherung) und sp+0x60..0x68 (ps).
+                   bhSetEffParticle (effsub3.c:999-1001) uebernimmt *dirP als oP->xn, normiert es und
+                   streut daraus alle 16 Punktrichtungen: Partikelflug aus Stapelrest. Erreicht bei
+                   jedem toedlichen Griff (bhEne09_PlayerControl, plp->mode2 == 0) in Bild 70.
+                   Regel 4 (kein anderer Pfad weist pd zu; Argument eines ohnehin gemachten Aufrufs):
+                   pd = 0. njUnitVector laesst den Nullvektor stehen, die Punkte fallen nur unter
+                   vtx_gravity. */
+                const RECVX_ENEMY_VEC ps={0.0f,0.5f,0.0f},pd={0.0f,0.0f,0.0f};
+                const RECVX_T3_LINK link={NULL,1};
+                if(x&&x->player_hit_set)x->player_hit_set(5,NULL,NULL);
+                else en09_gap(epw,"bhEne09_PlyDG00: plp->djnt_no (en09.c:5426)");
+                for(int i=0;i<3;++i){
+                    if(x&&x->effect_particle)(void)x->effect_particle(link,5,&ps,&pd,0xFF5F0000u,12);
+                    else en09_gap(epw,"bhEne09_PlyDG00: bhSetEffParticle (en09.c:5428)");
+                }
+                RECVX_T3_EFF ef;memset(&ef,0,sizeof(ef));
+                ef.flg=1;ef.sx=2.0f;ef.sy=2.0f;ef.id=5;ef.type=2;
+                if(x&&x->effect_tb)(void)x->effect_tb(&ef,&ps,link,5);
+                else en09_gap(epw,"bhEne09_PlyDG00: bhSetEffectTb (en09.c:5448)");
+            }
             if(f==60)plp->flg|=2;
             unsigned n=epw->sv->player_motion_frames?epw->sv->player_motion_frames(plp->mtn_no,1):0;
             if(!n)en09_gap(epw,"EN09 Griff: Spieler-Motionquelle");
