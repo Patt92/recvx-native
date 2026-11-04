@@ -1,5 +1,6 @@
 #define SDL_MAIN_HANDLED
 #include "frontend.h"
+#include "netplay.h"
 #include "world.h"
 #include "movie.h"
 #include "asset_io.h"
@@ -11,8 +12,31 @@ static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(m
 static SDL_Event key(SDL_Scancode code,bool down){SDL_Event e{};e.type=down?SDL_KEYDOWN:SDL_KEYUP;e.key.keysym.scancode=code;return e;}
 struct Quit{~Quit(){SDL_Quit();}};
 int main(int argc,char** argv){try{
-    SDL_SetMainReady();SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");check(SDL_Init(SDL_INIT_GAMECONTROLLER)==0,"SDL init");Quit quit;_Make_SinTable();
+    SDL_SetMainReady();SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");SDL_setenv("SDL_VIDEODRIVER","dummy",1);check(SDL_Init(SDL_INIT_GAMECONTROLLER|SDL_INIT_VIDEO)==0,"SDL init");Quit quit;_Make_SinTable();
     const auto path=std::filesystem::temp_directory_path()/("recvx-frontend-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".ini");auto config=InputConfig::defaults();config.save(path);InputManager devices(config);Frontend front(config,path);front.changed=[&](const InputConfig& value){devices.configure(value);};
+    {Frontend lobby(config,path);for(unsigned i=0;i<100;++i)lobby.apply({});lobby.input(MenuInput::Confirm);for(unsigned i=0;i<50;++i)lobby.apply({});
+        lobby.input(MenuInput::Down);lobby.apply({});lobby.input(MenuInput::Down);lobby.apply({});check(lobby.cursor()==Frontend::multiplayer_row,"multiplayer row missing");
+        lobby.input(MenuInput::Confirm);lobby.apply({});check(lobby.multiplayer()&&!lobby.lobby(),"multiplayer submenu missing");
+        bool left=false,connected=false,solo=false;lobby.solo_with_npc=[&]{solo=true;};lobby.leave_lobby=[&]{left=true;};lobby.connect_lobby=[&](bool host,bool p2,const std::string& address){connected=host&&p2&&!address.empty();};
+        lobby.input(MenuInput::Down);lobby.input(MenuInput::Confirm);check(lobby.lobby(),"lobby missing");
+        auto shortcut=[&](SDL_Scancode code,SDL_Keymod mods){auto e=key(code,true);e.key.keysym.mod=mods;return lobby.lobby_event(e);};
+        auto clipboard=[](){char* raw=SDL_GetClipboardText();const std::string value=raw?raw:"";SDL_free(raw);return value;};
+        lobby.lobby_address="127.0.0.1:57341";
+        check(shortcut(SDL_SCANCODE_C,KMOD_CTRL)&&clipboard()==lobby.lobby_address,"copy IP and port");
+        check(shortcut(SDL_SCANCODE_C,SDL_Keymod(KMOD_GUI|KMOD_SHIFT)),"copy phrase shortcut not consumed");const auto phrase=clipboard();check(Netplay::endpoint(phrase)==Netplay::endpoint(lobby.lobby_address),"copied phrase differs from address");
+        SDL_SetClipboardText("invalid clipboard");shortcut(SDL_SCANCODE_V,KMOD_CTRL);check(lobby.lobby_address=="127.0.0.1:57341","invalid paste changed the address");
+        SDL_SetClipboardText(("  "+phrase+"\n").c_str());shortcut(SDL_SCANCODE_V,KMOD_GUI);check(lobby.lobby_address==phrase,"phrase paste failed to trim surrounding whitespace");
+        lobby.lobby_address="12.4";lobby.input(MenuInput::Down);lobby.input(MenuInput::Down);lobby.input(MenuInput::Confirm);check(lobby.lobby_editing(),"address editor unavailable");
+        lobby.lobby_event(key(SDL_SCANCODE_HOME,true));check(lobby.lobby_event(key(SDL_SCANCODE_W,true))&&lobby.lobby_character()==0&&lobby.lobby_address=="12.4","letter key reached gameplay/menu bindings");
+        SDL_Event text{};text.type=SDL_TEXTINPUT;SDL_strlcpy(text.text.text,"9",sizeof text.text.text);lobby.lobby_event(text);check(lobby.lobby_address=="912.4"&&lobby.lobby_character()==1,"typing did not insert at cursor");
+        lobby.lobby_event(key(SDL_SCANCODE_BACKSPACE,true));lobby.input(MenuInput::Right);SDL_strlcpy(text.text.text,"7",sizeof text.text.text);lobby.lobby_event(text);check(lobby.lobby_address=="172.4","middle insertion/backspace failed");
+        lobby.input(MenuInput::Cancel);check(lobby.lobby_address=="12.4"&&!lobby.lobby_editing(),"cancel did not restore original address");
+        lobby.lobby_address="127.0.0.1:57341";lobby.input(MenuInput::Down);lobby.input(MenuInput::Down);lobby.input(MenuInput::Right);lobby.input(MenuInput::Confirm);check(clipboard()==phrase,"controller clipboard row did not copy phrase");
+        lobby.lobby_busy=true;lobby.input(MenuInput::Right);SDL_SetClipboardText("1.2.3.4:1234");lobby.input(MenuInput::Confirm);check(lobby.lobby_address=="127.0.0.1:57341","clipboard altered an active connection address");lobby.lobby_busy=false;
+        for(unsigned i=0;i<6;++i)lobby.input(MenuInput::Up);
+        lobby.input(MenuInput::Down);lobby.input(MenuInput::Right);lobby.input(MenuInput::Down);lobby.input(MenuInput::Down);lobby.input(MenuInput::Confirm);check(connected,"lobby player assignment not passed to runtime");
+        lobby.lobby_busy=true;lobby.input(MenuInput::Cancel);check(left&&!lobby.lobby(),"busy lobby cannot cancel");lobby.lobby_busy=false;lobby.input(MenuInput::Up);lobby.input(MenuInput::Confirm);check(lobby.title()&&solo,"solo does not select the NPC companion and return to title");
+    }
     // Der gespeicherte Einstellungsstand muss die Host-Pause auf Escape behalten und
     // Escape aus quit heraushalten, sonst schliesst die Pausentaste ein laufendes Spiel.
     check(InputConfig::read(path).describe(Action::Pause,false)=="P / Escape"&&InputConfig::read(path).describe(Action::Quit,false)=="F10","a saved controls.ini loses the Escape pause key or keeps Escape as a quit key");
@@ -28,7 +52,7 @@ int main(int argc,char** argv){try{
     press(SDL_SCANCODE_UP);check(front.cursor()==Frontend::new_game_cursor,"LOAD GAME selectable without memory card");
     for(int i=0;i<4;++i)press(SDL_SCANCODE_DOWN);check(front.cursor()==Frontend::quit_row,"cursor does not clamp on the QUIT row");
     press(SDL_SCANCODE_ESCAPE);check(front.mode()==10,"Cancel does not fade the plate out");settle(6);check(front.press_start(),"Cancel does not return to PRESS START");
-    press(SDL_SCANCODE_RETURN);settle(9);check(front.cursor()==Frontend::quit_row,"Cursor[0] must persist across Cancel");press(SDL_SCANCODE_UP);check(front.cursor()==Frontend::option_cursor,"OPTION row");press(SDL_SCANCODE_RETURN);check(front.mode()==17&&!front.starting(),"OPTION does not start the leave fade");
+    press(SDL_SCANCODE_RETURN);settle(9);check(front.cursor()==Frontend::quit_row,"Cursor[0] must persist across Cancel");press(SDL_SCANCODE_UP);press(SDL_SCANCODE_UP);check(front.cursor()==Frontend::option_cursor,"OPTION row");press(SDL_SCANCODE_RETURN);check(front.mode()==17&&!front.starting(),"OPTION does not start the leave fade");
     for(int i=0;i<400&&!front.settings();++i)tick();check(front.settings()&&!front.gamepad_page(),"keyboard settings inaccessible");
     for(unsigned i=0;i<Frontend::audio_row;++i)front.input(MenuInput::Down);
     front.input(MenuInput::Right);check(audio_settings.mode()==1&&applied_mode==1&&AudioConfig(audio_path).mode()==1,"OPTION sound mode must reach runtime and survive reload");
@@ -61,7 +85,7 @@ int main(int argc,char** argv){try{
         auto quit_config=InputConfig::defaults();Frontend quit(quit_config,path);unsigned sounds=0,last=99;quit.sound=[&](unsigned id){++sounds;last=id;};
         auto settle_quit=[&](int mode){for(int i=0;i<400&&quit.mode()!=mode;++i)quit.apply({});check(quit.mode()==mode,"quit title mode");};
         settle_quit(6);quit.input(MenuInput::Confirm);quit.apply({});check(last==3&&sounds==1,"CheckStartButton SE 3");settle_quit(9);
-        for(int i=0;i<2;++i){quit.input(MenuInput::Down);quit.apply({});}check(quit.cursor()==Frontend::quit_row&&last==2,"QUIT row / cursor SE 2");
+        for(int i=0;i<3;++i){quit.input(MenuInput::Down);quit.apply({});}check(quit.cursor()==Frontend::quit_row&&last==2,"QUIT row / cursor SE 2");
         quit.input(MenuInput::Confirm);check(quit.apply({})==FrontendCommand::None&&quit.mode()==17&&last==3,"QUIT leave fade");
         FrontendCommand r=FrontendCommand::None;unsigned ticks=0;for(;ticks<100&&r==FrontendCommand::None;++ticks)r=quit.apply({});check(r==FrontendCommand::Quit&&ticks>=30&&ticks<=31,"QUIT command after GetSamurai(50) = 30 frames");
         Frontend attract(quit_config,path);for(int i=0;i<400&&attract.mode()!=6;++i)attract.apply({});for(int i=0;i<1000&&attract.attract_count()==0;++i)attract.apply({});

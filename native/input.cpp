@@ -18,7 +18,7 @@
 #include <stdexcept>
 namespace recvx {
 namespace {
-constexpr const char* names[]={"forward","back","turn_left","turn_right","run","inventory","confirm","cancel","up","down","left","right","skip","pause","quit","wireframe","aim","attack","next_target","select"};
+constexpr const char* names[]={"forward","back","turn_left","turn_right","run","inventory","confirm","cancel","up","down","left","right","skip","pause","quit","wireframe","aim","attack","next_target","select","trade"};
 const char* defaults_text=R"INI(# RECVX controls: edit and restart. SDL scancode names use physical key positions.
 # Multiple alternatives are separated by commas. 'none' disables this device's binding.
 # Escape is the menu Cancel key and the host pause key: with no menu, dialogue or
@@ -48,6 +48,8 @@ next_target = Q
 # (system.c:545 bhSysCallGame, sys->pad_ps 0x10000). P is the host key paired with
 # the controller's Back/Select button (docs/CONTROLS.md); rebind as needed.
 select = P
+# Hold the modifier before Inventory. Chords use a spaced +.
+trade = Left Shift + Tab, Right Shift + Tab
 
 [gamepad]
 forward = axis:lefty-, button:dpup
@@ -70,6 +72,7 @@ aim = button:rightshoulder
 attack = button:a
 next_target = button:leftshoulder
 select = button:back
+trade = button:leftshoulder + button:y
 
 [settings]
 deadzone = 0.25
@@ -89,6 +92,11 @@ InputConfig parse(std::istream& stream){InputConfig out;std::string section,line
                 else if(key=="repeat_delay_ticks"||key=="repeat_interval_ticks"){if(value.empty()||value.find_first_not_of("0123456789")!=value.npos)throw std::runtime_error("repeat ticks must be integers");const auto n=std::stoul(value);if(!n||n>600)throw std::runtime_error("repeat ticks must be 1..600");(key=="repeat_delay_ticks"?out.repeat_delay:out.repeat_interval)=unsigned(n);}else throw std::runtime_error("unknown setting");continue;}
             const auto index=action(key);if(value=="none")continue;if(value.empty())throw std::runtime_error("empty binding; use none");std::istringstream values(value);std::string item;unsigned count=0;
             while(std::getline(values,item,',')){if(++count>16)throw std::runtime_error("too many alternatives");item=trim(item);InputBinding binding{InputBinding::Kind::Key,0,1};
+                const auto chord=item.find(" + ");
+                if(chord!=std::string::npos){const auto modifier=trim(item.substr(0,chord));item=trim(item.substr(chord+3));
+                    if(section=="keyboard"){binding.modifier=SDL_GetScancodeFromName(modifier.c_str());if(binding.modifier==SDL_SCANCODE_UNKNOWN)throw std::runtime_error("unknown keyboard chord modifier");}
+                    else{if(modifier.rfind("button:",0)!=0||item.rfind("button:",0)!=0)throw std::runtime_error("gamepad chords require two buttons");binding.modifier=SDL_GameControllerGetButtonFromString(modifier.substr(7).c_str());if(binding.modifier==SDL_CONTROLLER_BUTTON_INVALID)throw std::runtime_error("unknown controller chord modifier");}}
+
                 if(section=="keyboard"){binding.code=SDL_GetScancodeFromName(item.c_str());if(binding.code==SDL_SCANCODE_UNKNOWN)throw std::runtime_error("unknown keyboard scancode: "+item);}
                 else if(item.rfind("button:",0)==0){binding.kind=InputBinding::Kind::Button;binding.code=SDL_GameControllerGetButtonFromString(item.substr(7).c_str());if(binding.code==SDL_CONTROLLER_BUTTON_INVALID)throw std::runtime_error("unknown gamepad button: "+item);}
                 else if(item.rfind("axis:",0)==0&&item.size()>6&&(item.back()=='+'||item.back()=='-')){binding.kind=InputBinding::Kind::Axis;binding.direction=item.back()=='+'?1:-1;binding.code=SDL_GameControllerGetAxisFromString(item.substr(5,item.size()-6).c_str());if(binding.code==SDL_CONTROLLER_AXIS_INVALID)throw std::runtime_error("unknown gamepad axis: "+item);}
@@ -96,6 +104,11 @@ InputConfig parse(std::istream& stream){InputConfig out;std::string section,line
             if(value.back()==',')throw std::runtime_error("empty trailing alternative");
         }catch(const std::exception& e){throw std::runtime_error("controls line "+std::to_string(lineno)+": "+e.what());}}
     for(const auto* device:{"keyboard","gamepad"})for(auto name:names)if(!seen.count(std::string(device)+"/"+name)){
+        if(std::string(name)=="trade"){
+            if(std::string(device)=="keyboard"){out.bindings[unsigned(Action::Trade)].push_back({InputBinding::Kind::Key,SDL_SCANCODE_TAB,1,SDL_SCANCODE_LSHIFT});out.bindings[unsigned(Action::Trade)].push_back({InputBinding::Kind::Key,SDL_SCANCODE_TAB,1,SDL_SCANCODE_RSHIFT});}
+            else out.bindings[unsigned(Action::Trade)].push_back({InputBinding::Kind::Button,SDL_CONTROLLER_BUTTON_Y,1,SDL_CONTROLLER_BUTTON_LEFTSHOULDER});
+            continue;
+        }
         if(std::string(name)=="aim"||std::string(name)=="attack"||std::string(name)=="next_target"||std::string(name)=="pause"||std::string(name)=="select"){
             const bool pad=std::string(device)=="gamepad";
             if(std::string(name)=="pause"){out.bindings[unsigned(Action::Pause)].push_back({pad?InputBinding::Kind::Button:InputBinding::Kind::Key,pad?int(SDL_CONTROLLER_BUTTON_BACK):int(SDL_SCANCODE_P),1});if(!pad)out.bindings[unsigned(Action::Pause)].push_back({InputBinding::Kind::Key,SDL_SCANCODE_ESCAPE,1});continue;}
@@ -109,7 +122,7 @@ InputConfig parse(std::istream& stream){InputConfig out;std::string section,line
        das Menue-Abbruch und Host-Pause ist, ein laufendes Spiel (docs/CONTROLS.md).
        Aeltere controls.ini mit `quit = Escape, F10` behalten so nur F10. */
     {auto& quit=out.bindings[unsigned(Action::Quit)];const auto& cancel=out.bindings[unsigned(Action::Cancel)];
-     quit.erase(std::remove_if(quit.begin(),quit.end(),[&](const InputBinding& b){return std::find_if(cancel.begin(),cancel.end(),[&](const InputBinding& c){return c.kind==b.kind&&c.code==b.code&&c.direction==b.direction;})!=cancel.end();}),quit.end());}
+     quit.erase(std::remove_if(quit.begin(),quit.end(),[&](const InputBinding& b){return std::find_if(cancel.begin(),cancel.end(),[&](const InputBinding& c){return c.kind==b.kind&&c.code==b.code&&c.direction==b.direction&&c.modifier==b.modifier;})!=cancel.end();}),quit.end());}
     if(out.menu_threshold<out.deadzone)throw std::runtime_error("menu_threshold must be at least deadzone");return out;
 }
 }
@@ -143,6 +156,10 @@ std::string InputConfig::describe(Action action,bool gamepad)const{
             static const char* buttons[]={"A","B","X","Y","Back","Guide","Start/Options","Stick L","Stick R","LB","RB","D-pad hoch","D-pad runter","D-pad links","D-pad rechts"};
             label=binding.code<int(sizeof(buttons)/sizeof(*buttons))?buttons[binding.code]:SDL_GameControllerGetStringForButton(SDL_GameControllerButton(binding.code));
         }else{static const char* axes[]={"Stick X","Stick Y","Stick R X","Stick R Y","LT","RT"};label=std::string(axes[binding.code])+(binding.direction>0?" +":" -");}
+        if(binding.modifier>=0){std::string modifier;
+            if(binding.kind==InputBinding::Kind::Key)modifier=SDL_GetScancodeName(SDL_Scancode(binding.modifier));
+            else modifier=binding.modifier==SDL_CONTROLLER_BUTTON_LEFTSHOULDER?"LB":SDL_GameControllerGetStringForButton(SDL_GameControllerButton(binding.modifier));
+            label=modifier+" + "+label;}
         if(!result.empty())result+=" / ";result+=label;
     }return result.empty()?"Nicht belegt":result;
 }
@@ -152,6 +169,7 @@ void InputConfig::save(const std::filesystem::path& path)const{
         for(unsigned a=0;a<action_count;++a){text<<names[a]<<" = ";bool any=false;for(const auto& binding:bindings[a]){
             if((binding.kind!=InputBinding::Kind::Key)!=gamepad)continue;
             if(any)text<<", ";any=true;
+            if(binding.modifier>=0){if(binding.kind==InputBinding::Kind::Key)text<<SDL_GetScancodeName(SDL_Scancode(binding.modifier));else text<<"button:"<<SDL_GameControllerGetStringForButton(SDL_GameControllerButton(binding.modifier));text<<" + ";}
             if(binding.kind==InputBinding::Kind::Key)text<<SDL_GetScancodeName(SDL_Scancode(binding.code));
             else if(binding.kind==InputBinding::Kind::Button)text<<"button:"<<SDL_GameControllerGetStringForButton(SDL_GameControllerButton(binding.code));
             else text<<"axis:"<<SDL_GameControllerGetStringForAxis(SDL_GameControllerAxis(binding.code))<<(binding.direction>0?"+":"-");
@@ -178,7 +196,7 @@ void InputManager::refresh(Pad& p){for(unsigned a=0;a<p.axes.size();++a)p.axes[a
 void InputManager::open(int index){if(!SDL_IsGameController(index))return;const auto id=SDL_JoystickGetDeviceInstanceID(index);if(pads_.count(id))return;
     auto* controller=SDL_GameControllerOpen(index);if(!controller){std::cerr<<"Controller unavailable: "<<SDL_GetError()<<'\n';return;}Pad pad;pad.handle=controller;while(std::any_of(pads_.begin(),pads_.end(),[&](const auto& item){return item.second.slot==pad.slot;}))++pad.slot;refresh(pad);pads_.emplace(id,pad);std::cout<<"Controller connected: "<<SDL_GameControllerName(controller)<<'\n';evaluate(false);}
 void InputManager::evaluate(bool edges){for(unsigned a=0;a<action_count;++a){bool down=false;if(focused_)for(const auto& b:config_.bindings[a]){
-        if(b.kind==InputBinding::Kind::Key)down=down||(route_.keyboard&&keys_.at(b.code));else for(const auto& item:pads_){const auto& p=item.second;if(!accepts(p))continue;if(b.kind==InputBinding::Kind::Button)down=down||p.buttons.at(b.code);else{const auto raw=p.axes.at(b.code);const float axis=raw<0?raw/32768.f:raw/32767.f;down=down||axis*b.direction>=(navigation(a)?config_.menu_threshold:config_.deadzone);}}}
+        if(b.kind==InputBinding::Kind::Key)down=down||(route_.keyboard&&keys_.at(b.code)&&(b.modifier<0||keys_.at(b.modifier)));else for(const auto& item:pads_){const auto& p=item.second;if(!accepts(p))continue;if(b.kind==InputBinding::Kind::Button)down=down||(p.buttons.at(b.code)&&(b.modifier<0||p.buttons.at(b.modifier)));else{const auto raw=p.axes.at(b.code);const float axis=raw<0?raw/32768.f:raw/32767.f;down=down||axis*b.direction>=(navigation(a)?config_.menu_threshold:config_.deadzone);}}}
         if(edges&&down&&!held_[a])pending_[a]=true;held_[a]=down;}}
 void InputManager::event(const SDL_Event& e){if(e.type==SDL_CONTROLLERDEVICEADDED){open(e.cdevice.which);return;}
     if(e.type==SDL_CONTROLLERDEVICEREMOVED){auto p=pads_.find(e.cdevice.which);if(p!=pads_.end()){SDL_GameControllerClose(p->second.handle);pads_.erase(p);std::cout<<"Controller disconnected\n";}evaluate();return;}

@@ -5,6 +5,7 @@
 namespace recvx {
 struct DoorRequest {
     unsigned attribute=0,stage=0,room=0,spawn=0,type=0,room_case=0;
+    bool scripted=false; // Host companion transport provenance; no original door operand changes.
     std::string room_name() const;
 };
 class DoorSequence {

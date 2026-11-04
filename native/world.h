@@ -517,14 +517,32 @@ public:
     void tick_after_player();
     // Optional Player 2 belongs to this RoomWorld and uses WorldEntity's
     // existing object-tree owner. No original enemy/player slot is replaced.
-    void enable_player2(Player2Mode mode,std::shared_ptr<const PlayerAsset> asset,SceneSpawn spawn,unsigned character=0);
+    void enable_player2(Player2Mode mode,std::shared_ptr<const PlayerAsset> asset,SceneSpawn spawn,unsigned character=0,std::shared_ptr<Player2Progress> progress={},Player2RoomChange cause=Player2RoomChange::Reload,bool escort=true);
+    void checkpoint_player2();
+    bool player2_can_escort()const;
+    bool order_player2_door(unsigned interaction);
+    std::function<std::optional<SceneSpawn>(const DoorRequest&)> player2_room_entry;
     void set_player2_mode(Player2Mode mode);
     Player2Mode player2_mode()const{return player2_?player2_->mode:Player2Mode::Off;}
     const WorldEntity* player2_state()const{return player2_?&player2_->work:nullptr;}
     const std::set<std::string>& player2_gaps()const{return player2_gaps_;}
     using Player2Driver=std::function<Player2Command(const RoomWorld&)>;
+    NpcAiDecision npc_ai(const NpcAiActor& actor)const;
     void set_player2_driver(Player2Driver driver){player2_driver_=std::move(driver);}
     void tick_player2(Player2Command local,bool free_control);
+    const Player2Progress* player2_progress()const{return player2_?player2_->progress.get():nullptr;}
+    bool player2_present()const;
+    unsigned enemy_target()const{return enemy_target_;}
+    bool player2_driven()const{return player2_&&player2_->driven;}
+    int player2_floor()const{return player2_?player2_->floor:0;}
+    unsigned player2_targeted()const{unsigned n=0;for(const auto& t:enemy_targets_)n+=t.second==1u;return n;}
+    bool damage_player2(int amount);
+    bool place_player2(SceneSpawn spawn); // explicit debug/replay placement; rejects incapacitated actors
+    bool player2_trade_ready()const;
+    bool reload_player2_item(unsigned slot,unsigned game_mode);
+    bool equip_player2_item(unsigned slot);
+    std::optional<ItemUseResult> use_player2_item(unsigned slot,unsigned game_mode);
+    Inventory::TradeResult trade_player2(Inventory& primary,bool from_partner,unsigned source,unsigned destination);
     void control_lights(); // light.c:332 bhControlLight (game.c:59; auch bhInitCamSet event.c:4745)
     unsigned take_enemy_room_flags(){const auto flags=enemy_spawn_.room_flags;enemy_spawn_.room_flags=0;return flags;}
     Scene sample_player(const PlayerAsset& player,std::vector<BoneMatrix>* nodes=nullptr,const ModelNodeOverrides& combat={})const;
@@ -940,7 +958,9 @@ private:
     std::map<std::pair<unsigned,unsigned>,WorldEntity> entities_;
     struct Player2 {
         WorldEntity work;
-        std::shared_ptr<const PlayerAsset> asset;
+        std::shared_ptr<PlayerAsset> asset;
+        std::shared_ptr<Player2Progress> progress;
+        std::shared_ptr<class CombatController> combat;
         Player2Mode mode=Player2Mode::Off;
         RECVX_PLAYER_ACTION action{};
         unsigned character=0,pad=0,pad_old=0,flags2=0,status=0,head_flags=0;
@@ -949,12 +969,41 @@ private:
         std::optional<std::size_t> step;
         NJS_POINT3 safe{},previous_probe{};
         float front_offset=0;
+        unsigned presentation=1;
+        std::optional<unsigned> door_order;
+        // Enemy-side view of this actor (host binding of the enemy mechanisms to Player 2):
+        // the plp fields an enemy reads/writes through get/set, kept here instead of a second work.
+        std::int32_t ct0=0,ct1=0,ayp=0,mtn_add=0;unsigned at_flags=0,lever=0,enemy_owner=0,mtn_md=0,pad_full=0;
+        bool enemy_motion=false,driven=false,collapse_pending=false;const RECVX_ENEMY_WORK* enemy_work=nullptr;const RECVX_ENEMY_WORK* driver=nullptr;
+        BoneMatrix link_matrix{};bool link_valid=false; // PlayerLink root of this actor while an enemy carries it
     };
     std::optional<Player2> player2_;
+    // Which bound player the running enemy work sees (0 = Player 1, 1 = Player 2); chosen per pass in begin_enemy_pass.
+    unsigned enemy_target_=0;std::map<const RECVX_ENEMY_WORK*,unsigned> enemy_targets_;const RECVX_ENEMY_WORK* player_driver_=nullptr;
+    bool player2_enemy_get(RECVX_ENEMY_PLAYER& out)const;bool player2_enemy_set(const RECVX_ENEMY_PLAYER& in);
+    // The actor the running enemy work sees (Player 1 or the Player 2 extension); enemy services read these instead of player_.
+    SceneSpawn& target_actor(){return enemy_target_==1u&&player2_?player2_->work.transform:player_;}
+    NJS_POINT3 target_position()const{return enemy_target_==1u&&player2_?player2_->work.transform.position:player_.position;}
+    BoneMatrix& target_link_matrix(){return enemy_target_==1u&&player2_?player2_->link_matrix:player_link_matrix_;}
+    bool& target_link_valid(){return enemy_target_==1u&&player2_?player2_->link_valid:player_link_matrix_valid_;}
+    std::int32_t target_ayp()const{return enemy_target_==1u&&player2_?player2_->ayp:player_ayp_;}
+    unsigned target_character()const{return enemy_target_==1u&&player2_?player2_->character:player_character_;}
+    MotionActor target_motion_actor();
+    void begin_enemy_pass(RECVX_ENEMY_WORK* w);const MotionClip* player2_enemy_clip()const;int player2_set_motion_now(int add,const MotionClip*& clip);
+    void player2_driven_tick();bool player2_targetable()const;void player2_incapacitate();void player2_apply_hp(int hp);
     Player2Driver player2_driver_;
     std::set<std::string> player2_gaps_;
+    std::filesystem::path player2_data_,player2_mods_;
     void commit_player2_pose(int add);
     void append_player2(Scene& scene)const;
+    void player2_model(const ModelNodeOverrides& edits={});
+    void player2_motion(unsigned motion,std::int32_t frame,unsigned mode,unsigned count,int rate);
+    Player2Command player2_ai();
+    void player2_life_tick();
+    void resolve_player2_body(NJS_POINT3 previous);
+    void player2_bomb_damage(const BombRequest& bomb);
+    std::optional<DoorRequest> player2_door(unsigned interaction,bool probe)const;
+    bool exit_player2_door();
     mutable std::set<std::string> unbound_enemy_; // const owP/pose services report their gaps too
     mutable std::set<std::string> render_warnings_; // Host-Diagnose fuer isolierte Darstellungsfehler
     // Plaetze, deren letzter Zeichenpass das Rueckseitentor flg 0x20000 geschlossen

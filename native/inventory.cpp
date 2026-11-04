@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <stdexcept>
 #include <tuple>
+#include <map>
 namespace recvx {
 // Inventarmechanik, eigenständig nativ auf diesem einzigen Bestandsbesitzer.
 // Semantikreferenz: sub1.c (GetItem, ItemSort, ItemSearch, EraseItem,
@@ -761,12 +762,16 @@ bool Inventory::box_change(unsigned slot,unsigned index,unsigned box,unsigned st
     // nur 67,97 % matching, Ablauf belegt in docs/INVENTORY_CONTRACT.md).
     // `slot` ist listcsr_0, `index` ibcsr, st->bxp = itm[box].
     if(out)*out=0;const unsigned count=box==64?128:(box==192||box==224)?32:0;
-    if(!count||slot<1||slot>=capacity()+2||index>=count||player>=3)return false;
-    std::uint32_t* const bxp=items.data()+box;
+    if(!count||index>=count)return false;
+    return box_change_entry(slot,items[box+index],stage,room,out,cursor_slot,cursor_cell);
+}
+bool Inventory::box_change_entry(unsigned slot,std::uint32_t& entry,unsigned stage,unsigned room,unsigned* out,unsigned* cursor_slot,unsigned cursor_cell){
+    if(out)*out=0;
+    if(slot<1||slot>=capacity()+2||player>=3)return false;
     const unsigned lt_c=slot,sakai=wide_boundary(); // letzter ItemSort-Stand vor dem Tausch
     unsigned lt_c2=lt_c,lt_c3=0,chk=0;
     const std::uint32_t pocket=slots()[lt_c];   // $t3
-    std::uint32_t incoming=bxp[index];           // $t4 (itemid3)
+    std::uint32_t incoming=entry;           // $t4 (itemid3)
     std::uint32_t parked=0;                      // $v1: Wert für pip[lt_c3]
     const unsigned id1=id(pocket),id2=id(incoming);
     const unsigned arms=id(slots()[slots()[0]]);
@@ -806,7 +811,7 @@ bool Inventory::box_change(unsigned slot,unsigned index,unsigned box,unsigned st
             // plp->wpnr_no = 0, sys->mn_mode0 = 3 (Kampfbesitzer über weapon_change).
             slots()[0]=0;wpnr_no=0;weapon_change_={true,0,false};request_weapon_reload(); /* sub1.c:7929-7931 */
         }
-        bxp[index]=pocket;
+        entry=pocket;
         slots()[lt_c2]=incoming;
         if(lt_c3)slots()[lt_c3]=parked;
         auto& eq=slots()[0];
@@ -836,13 +841,66 @@ bool Inventory::box_change(unsigned slot,unsigned index,unsigned box,unsigned st
         if(itemdata[id2].cmb>=0){
             const unsigned pos=unsigned(itemdata[id2].cmb);unsigned n=unsigned(combidata[pos]);
             for(unsigned x=pos+1;n;--n,x+=3)if(unsigned(combidata[x])==id1){
-                combi_01(x,bxp[index],slots()[stack_slot]);break;
+                combi_01(x,entry,slots()[stack_slot]);break;
             }
         }
         return true;
     }
     if(out)*out=159;
     return false;
+}
+
+bool Inventory::npc_trade_item_allowed(std::uint32_t entry){
+    const auto item=id(entry);if(!item)return true;if(item>=156)return false;
+    // Host supply policy over the original categories: weapons, medicine,
+    // ribbons and reload ammunition with an actual combination table.
+    // Type 2 alone also includes the playing manual (no combination table).
+    const auto type=itemdata[item].type;
+    return !(type&0x40u)&&((type&(1u|8u|16u))||((type&2u)&&itemdata[item].cmb>=0));
+}
+Inventory::TradeResult Inventory::trade_with(Inventory& other,unsigned source,unsigned destination,unsigned stage,unsigned room,bool this_npc,bool other_npc){
+    if(this==&other||player>=3||other.player>=3||source<2||source>=capacity()+2||destination<2||destination>=other.capacity()+2)return {TradeResult::Invalid};
+    for(const auto* inv:{this,&other}){if(inv->slots()[0]>=12)return {TradeResult::Invalid};for(unsigned i=1;i<12;++i)if(id(inv->slots()[i])>=156)return {TradeResult::Invalid};}
+    const auto outgoing=slots()[source],incoming=other.slots()[destination];
+    if(!id(outgoing)&&!id(incoming))return {TradeResult::Empty};
+    if(id(outgoing)>=156||id(incoming)>=156)return {TradeResult::Invalid};
+    if((other_npc&&!npc_trade_item_allowed(outgoing))||(this_npc&&!npc_trade_item_allowed(incoming)))return {TradeResult::Restricted};
+    // The normal crate grid does not expose pip[1]. Keep actor-specific
+    // standard equipment pinned there, including a cross-character arrival.
+    if(standard_weapon(other.player,id(outgoing))||standard_weapon(player,id(incoming)))return {TradeResult::Restricted};
+    struct Saved {std::array<std::uint32_t,12> slots;unsigned weapon;bool reload;WeaponChange change;};
+    const auto save=[](const Inventory& inv){Saved saved{};std::copy_n(inv.slots(),12,saved.slots.begin());saved.weapon=inv.wpnr_no;saved.reload=inv.weapon_reload_;saved.change=inv.weapon_change_;return saved;};
+    const auto first=save(*this),second=save(other);
+    // These two 12-entry rollback records are a transaction journal, not a
+    // second Inventory/engine owner or a copy of the room-independent world.
+    auto restore=[&]{std::copy(first.slots.begin(),first.slots.end(),slots());wpnr_no=first.weapon;weapon_reload_=first.reload;weapon_change_=first.change;
+        std::copy(second.slots.begin(),second.slots.end(),other.slots());other.wpnr_no=second.weapon;other.weapon_reload_=second.reload;other.weapon_change_=second.change;};
+    struct Rollback{decltype(restore)& undo;bool committed=false;~Rollback(){if(!committed)undo();}} rollback{restore};
+    using Stock=std::map<std::pair<bool,std::uint32_t>,std::uint64_t>;
+    const auto stock=[](const Inventory& a,const Inventory& b){Stock counts;
+        for(const auto* inv:{&a,&b})for(unsigned i=1;i<12;++i){const auto value=inv->slots()[i],item=id(value);if(!item)continue;
+            const bool stack=(itemdata[item].type&0x200u)!=0;
+            // Combi_01 propagates the endless flag when stacks merge. Count
+            // stack units by item ID; the original operation owns those flags.
+            counts[{stack,stack?item:value}]+=stack?quantity(value):1u;}
+        return counts;};
+    const auto before=stock(*this,other);unsigned message=0;std::uint32_t entry=0;
+    if(!box_change_entry(source,entry,stage,room,&message))return {TradeResult::Restricted,message};
+    sort();
+    if(!other.box_change_entry(destination,entry,stage,room,&message))return {message==159?TradeResult::NoSpace:TradeResult::Restricted,message};
+    other.sort();
+    // The returned crate entry is the displaced item or a stack remainder.
+    // Put it into the source's free pocket, then let original ItemSort settle
+    // the grid. Combi_01 may first fill an existing stack before the free slot.
+    for(unsigned attempts=0;id(entry)&&attempts<12;++attempts){
+        unsigned free=2;while(free<capacity()+2&&id(slots()[free]))++free;
+        if(free>=capacity()+2)return {TradeResult::NoSpace,159};
+        const auto previous=entry;
+        if(!box_change_entry(free,entry,stage,room,&message))return {message==159?TradeResult::NoSpace:TradeResult::Restricted,message};
+        sort();if(entry==previous)return {TradeResult::Invalid};
+    }
+    if(id(entry)||before!=stock(*this,other))return {TradeResult::Invalid};
+    rollback.committed=true;return {TradeResult::Transferred};
 }
 
 }

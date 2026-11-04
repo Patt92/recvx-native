@@ -22,11 +22,13 @@
      hitchk.c   bhCheckWallAttrB89:5881
 
    Besitz (verbindlich, kein zweiter Arbeitssatz):
-   - RECVX_COMBAT_PLAYER ist die Kampfsicht auf den EINEN nativen Spieler-
-     work. Ihr einziger Besitzer ist recvx::CombatController; sie haelt genau
+   - RECVX_COMBAT_PLAYER ist die Kampfsicht auf genau einen nativen Actor-
+     work. Ihr Besitzer ist dessen recvx::CombatController; sie haelt genau
      die plp-Felder, die der Kampf liest oder schreibt (Fundstellen an den
      Feldern). Lage/Winkel kommen je Pass aus dem Host-Akteur und gehen
      danach dorthin zurueck; es gibt keine BH_PWORK-Kopie und kein sys/plp.
+     Die optionale Player-2-Erweiterung bindet ihren vorhandenen WorldEntity-
+     Besitzer ueber CombatActorBinding, niemals eine zweite Gegner-/Effektwelt.
    - Gegner sind ausschliesslich die RECVX_ENEMY_WORKs der vorhandenen
      Gegnertabelle (native/enemy_work.h, nur gelesen/beschrieben wie im
      Original). Keine eigene Ziel- oder Schadensliste.

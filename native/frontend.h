@@ -26,7 +26,9 @@ enum class FrontendCommand {None,TitleCall,NewGame,LoadGame,Quit};
 //  * ReturnCode 1 (attract demo after the 900-frame timer, ss_flg 0x400200) is
 //    not ported: the title re-initialises (Mode 0) as bhReturnTitle would after
 //    the demo. attract_count() counts these.
-//  * A fourth row QUIT (host, no original counterpart) at PosYDef[0][3] = 384,
+//  * Host MULTIPLAYER adds Solo/Lobby with direct TCP connection and player assignment.
+//    Five rows move the original plates upward, preserving their textures/colours.
+//  * A fifth row QUIT (host, no original counterpart) at PosYDef[0][3] = 384,
 //    rendered with the original system font in the plate colours; it leaves
 //    via the OPTION path (SE 3, GetSamurai(50) fade) and returns FrontendCommand::Quit.
 //  * Keyboard/controller "Confirm" stands for PS2 Start (0x800) and the OK
@@ -35,6 +37,14 @@ class Frontend {
 public:
     Frontend(InputConfig& config,std::filesystem::path path):config_(config),path_(std::move(path)){}
     bool active()const{return screen_!=Screen::Hidden;}
+    bool multiplayer()const{return screen_==Screen::Multiplayer||screen_==Screen::Lobby;}
+    bool lobby()const{return screen_==Screen::Lobby;}
+    std::function<void(bool,bool,const std::string&)> connect_lobby;
+    std::function<void()> leave_lobby;
+    std::function<void()> solo_with_npc;
+    bool lobby_busy=false,lobby_host=true,lobby_player2=false;
+    std::string lobby_address="127.0.0.1:57341",lobby_status;
+    void lobby_connected(){screen_=Screen::Title;mode_=0;from_title_=0;lobby_busy=false;}
     bool settings()const{return screen_==Screen::Controls;}
     bool title()const{return screen_==Screen::Title;}
     bool starting()const{return screen_==Screen::Title&&mode_==17&&gen_flag_;} // TitleCall fade (Mode 17, GenFlag 1)
@@ -63,6 +73,9 @@ public:
     FrontendCommand apply(const InputFrame& input);
     FrontendCommand input(MenuInput input,bool gamepad=false);
     void event(const SDL_Event& event);
+    bool lobby_event(const SDL_Event& event); // consumes text editing/clipboard before gameplay bindings
+    bool lobby_editing()const{return lobby_edit_;}
+    unsigned lobby_character()const{return lobby_character_;}
     void draw(SoftwareRenderer& image,GameUi& ui,std::size_t controllers);
     std::function<void(const InputConfig&)> changed;
     // LOAD GAME ist seit 2026-10-14 keine Abweichung mehr: liegen Schreib-
@@ -83,14 +96,14 @@ public:
     AudioConfig* audio=nullptr;
     std::function<void(unsigned)> audio_changed;
     static constexpr unsigned title_rows=3;          // CursorMax[0] with ExtraFlag 0: LOAD GAME, NEW GAME, OPTION
-    static constexpr unsigned quit_row=title_rows;   // host QUIT row (deviation)
+    static constexpr unsigned multiplayer_row=title_rows,quit_row=title_rows+1;   // host QUIT row (deviation)
     static constexpr unsigned load_game_cursor=0,new_game_cursor=1,option_cursor=2;
     // Host-Metrik (--state): Zeilenzahl der Spielmodustafel inkl. Host-QUIT und das Kommando
     // einer Zeile wie check_button (ModeCommandId, QUIT-Zeile 4). Keine Logik.
     unsigned rows()const{return cursor_max_+1;}
-    int row_command(unsigned row)const{return row==quit_row?4:row<4?mode_command_id_[row]:-1;}
+    int row_command(unsigned row)const{return row==multiplayer_row?5:row==quit_row?4:row<4?mode_command_id_[row]:-1;}
 private:
-    enum class Screen {Title,Controls,Hidden};
+    enum class Screen {Title,Controls,Multiplayer,Lobby,Hidden};
     // What the current Adv_BioCvTitle frame displayed (Display* calls of the
     // mode that ran); draw() renders it so that a mode change inside a frame
     // still shows that frame's plate like the original.
@@ -98,7 +111,7 @@ private:
     Screen screen_=Screen::Title;
     // ADV_WORK subset
     int mode_=0,next_mode_=0,next_return_code_=0,from_title_=0,gen_flag_=0,extra_flag_=0,fade_type_=0;
-    unsigned cursor_=0,cursor_max_=title_rows,font_base_color_=0xffffff,attract_count_=0;
+    unsigned cursor_=0,cursor_max_=quit_row,font_base_color_=0xffffff,attract_count_=0;
     int mode_command_id_[4]={0,1,2,3};
     float flush_count_=0,flush_speed_=0,flush_count2_=0,flush_speed2_=0,fade_rate_=0,fade_speed_=0,timer_=0,saver_timer_=9000,saver_rate_=0;
     int saver_command_=0;
@@ -118,6 +131,10 @@ private:
     std::string status_;
     void commit(const InputConfig& candidate);
     void arm();
+    bool lobby_edit_=false,lobby_address_initialized_=false,lobby_select_all_=false;unsigned lobby_character_=0,lobby_tool_=0;
+    std::string lobby_edit_before_;
+    void lobby_clipboard(unsigned action);
+    FrontendCommand multiplayer_input(MenuInput key);
     FrontendCommand controls_input(MenuInput key,bool pad);
 };
 }

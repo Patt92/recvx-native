@@ -25,7 +25,7 @@ std::vector<SaveSlotInfo> list_save_slots(const std::filesystem::path& saves_dir
                 const auto snap=read_snapshot(path);
                 info.exists=true;info.room=snap.host.room;info.player=unsigned(std::uint8_t(snap.save.ply_id));
                 info.hp=snap.save.ply_hp[std::uint8_t(snap.save.ply_id)&3];info.play_time=unsigned(snap.save.stv_tm);info.save_ct=unsigned(snap.save.save_ct);
-                info.game_mode=snap.save.gm_mode;
+                info.game_mode=snap.save.gm_mode;info.two_players=snap.host.two_players;
                 info.save_room=save_room(unsigned(std::uint8_t(snap.save.stg_no))*100+unsigned(std::uint8_t(snap.save.rom_no)));
             }catch(const std::exception&){info.exists=false;info.damaged=true;}
         }

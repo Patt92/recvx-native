@@ -255,6 +255,7 @@ constexpr std::size_t enemy_exp_budget=0xC40000; // eneset.c:910
 // SceneSpawn, the Runtime motion clock, EventVm and Inventory/head owners.
 // Sources: en07.c:2393 PlayerControl, player.c:1502, en01.c PlyDG00/01.
 bool RoomWorld::enemy_player_get(RECVX_ENEMY_PLAYER& out)const{
+    if(enemy_target_==1u)return player2_enemy_get(out);
     if(!player_asset_||!player_hp_owner_||!player_head_flags_)return false;
     out={};out.pos={player_.position.x,player_.position.y,player_.position.z};
     out.ax=player_.pitch;out.ay=player_.yaw;out.az=player_.roll;out.flr_no=collision_floor_;
@@ -280,6 +281,7 @@ bool RoomWorld::enemy_player_get(RECVX_ENEMY_PLAYER& out)const{
     return true;
 }
 bool RoomWorld::enemy_player_set(const RECVX_ENEMY_PLAYER& in){
+    if(enemy_target_==1u)return player2_enemy_set(in);
     if(!player_asset_||!player_hp_owner_||!player_head_flags_)return false;
     if(std::getenv("RECVX_POSITION_TRACE")&&(player_.position.x!=in.pos.x||player_.position.z!=in.pos.z))std::fprintf(stderr,"POSITION_WRITE mode=%u enemy=%u old=%.8g,%.8g,%.8g new=%.8g,%.8g,%.8g flg=%x stflg=%x floor=%d\n",unsigned(in.mode0),unsigned(enemy_table_.enow),player_.position.x,player_.position.y,player_.position.z,in.pos.x,in.pos.y,in.pos.z,in.flg,in.stflg,int(in.flr_no));
     /* Host-Komfortschalter "Gegnerangriffe" (enemy_attacks_, keine Originalmechanik): ein Pass, der den
@@ -332,6 +334,7 @@ bool RoomWorld::enemy_player_set(const RECVX_ENEMY_PLAYER& in){
     // mode0 5 (bhCPM0_enedam, player.c:6635) ist Zeile fuer Zeile bhCPM0_nage
     // (mode0 4, :6596): der Gegner fuehrt den Spieler (EN19 bhEne19_PlySetDamage,
     // en19.c:3827 setzt plp->mode0 = 5).
+    if(driven&&enemy_table_.enow<RECVX_ENEMY_SLOTS)player_driver_=enemy_table_.slot[enemy_table_.enow];
     if(driven){enemy_player_driving_=true;grab_driving_=true;player_scripted=true;player_room_motion_=false;player_smove_.active=false;}
     else if(enemy_player_driving_){enemy_player_driving_=false;grab_driving_=false;player_scripted=false;player_enemy_motion_=false;player_enemy_work_=nullptr;player_link_matrix_valid_=false;}
     if(in.hp<0&&player_damage_allowed)player_killed_=true;
@@ -345,7 +348,7 @@ bool RoomWorld::enemy_player_set(const RECVX_ENEMY_PLAYER& in){
 }
 unsigned RoomWorld::enemy_player_motion_frames(unsigned mtn,bool from_enemy)const{
     if(!player_asset_)return 0;
-    if(!from_enemy)return player_asset_->has_motion(mtn)?player_asset_->motion_frames(mtn):0;
+    if(!from_enemy){if(enemy_target_==1u&&player2_)return player2_->asset->has_motion(mtn)?player2_->asset->motion_frames(mtn):0;return player_asset_->has_motion(mtn)?player_asset_->motion_frames(mtn):0;}
     // PlayerControl queries the new enemy library before its final player_set.
     // enow therefore supplies the current caller, not a constant zombie ID.
     const auto i=enemy_table_.enow;
@@ -354,6 +357,7 @@ unsigned RoomWorld::enemy_player_motion_frames(unsigned mtn,bool from_enemy)cons
     return clip?clip->frames:0;
 }
 bool RoomWorld::enemy_player_joint(unsigned joint,BoneMatrix& out)const{
+    if(enemy_target_==1u&&player2_){const auto joints=player2_->asset->script_nodes(player2_->work.own_models.at(0).owp_mtx);if(joint>=joints.size())return false;out=joints[joint];return true;}
     if(joint>=player_joint_matrices_.size())return false;
     out=player_joint_matrices_[joint];return true;
 }
@@ -543,17 +547,20 @@ void RoomWorld::bind_enemy_services(){
         NJS_POINT3 p{local->x,local->y,local->z},q;njCalcPoint(&m.value,&p,&q);*out={q.x,q.y,q.z};return 1;};
     s.player_motion_frames=[](uint32_t mtn,int enemy)->uint32_t{return enemy_world->enemy_player_motion_frames(mtn,enemy!=0);};
     s.player_damage=[](RECVX_ENEMY_WORK*,const char*,int amount){
-        if(enemy_world&&enemy_world->player_hp_owner_&&enemy_world->enemy_attacks_)*enemy_world->player_hp_owner_-=amount; // Host-Schalter Gegnerangriffe
+        if(!enemy_world||!enemy_world->enemy_attacks_)return; // Host-Schalter Gegnerangriffe
+        if(enemy_world->enemy_target_==1u&&enemy_world->player2_){enemy_world->player2_apply_hp(enemy_world->player2_->work.hp-amount);return;}
+        if(enemy_world->player_hp_owner_)*enemy_world->player_hp_owner_-=amount;
     };
     s.lever_check=[]()->int{
         if(!enemy_world)return 0;
-        const unsigned ps=enemy_world->player_lever();
+        const unsigned ps=enemy_world->enemy_target_==1u&&enemy_world->player2_?enemy_world->player2_->lever:enemy_world->player_lever();
         int dec=0;
         if(ps&0xfu)dec=4;
         if(ps&0x2d00u)dec+=3;
         return dec;
     };
     s.player_clear_offset=[](){};
+    s.pass_begin=[](RECVX_ENEMY_WORK* w){enemy_world->begin_enemy_pass(w);};
     // bhCheckWallType (hitchk.c) over the room-then-mobile geometry.
     s.wall_type=[](const RECVX_ENEMY_VEC* p,uint32_t flg,float r,float h)->int{return enemy_world->collision_contact({p->x,p->y,p->z},flg,r,h)?1:0;};
     // hitchk.c:641 bhCheckWallEx fuer einen Gegnerwork (zonzon.c:1222
@@ -745,7 +752,8 @@ void RoomWorld::bind_enemy_services(){
             // Frames vor Ende der Sterbemotion, player.c:3917) gilt die zuletzt
             // verfolgte Wurzellage EXP_WORK nlxb/nlyb/nlzb (player.c:1379-1387),
             // die RoomWorld::tick wie bhControlPlayer fortschreibt.
-            ppx=world->player_nl_.x;ppy=world->player_nl_.y;ppz=world->player_nl_.z;
+            if(world->enemy_target_==1u){ppx=pl.pos.x;ppy=pl.pos.y;ppz=pl.pos.z;} /* Player 2 keeps no nlxb trace; its root stands in */
+            else{ppx=world->player_nl_.x;ppy=world->player_nl_.y;ppz=world->player_nl_.z;}
         }else{ppx=pl.pos.x;ppy=pl.pos.y;ppz=pl.pos.z;}
         const float ey=w->py+w->aoy;
         const float px=ppx-(w->px+w->aox),pz=ppz-(w->pz+w->aoz);
@@ -1023,32 +1031,33 @@ void RoomWorld::bind_enemy_services(){
                            const RECVX_EN01_XZ* local_offset,RECVX_ENEMY_VEC* out_delta)->int{
         auto* world=enemy_world;
         if(!world||!w||!world_point||!out_delta)return 0;
-        world->player_.position.x=world_point->x;
-        world->player_.position.z=world_point->z;
-        world->player_.yaw=ay&0xffff;
-        const NJS_POINT3 opos=world->player_link_matrix_valid_?
-            NJS_POINT3{world->player_link_matrix_.value[12],world->player_link_matrix_.value[13],world->player_link_matrix_.value[14]}:
-            NJS_POINT3{world->player_.position.x,world->player_.position.y,world->player_.position.z};
+        auto& plp=world->target_actor();auto& link=world->target_link_matrix();auto& link_valid=world->target_link_valid(); /* the player this work carries */
+        plp.position.x=world_point->x;
+        plp.position.z=world_point->z;
+        plp.yaw=ay&0xffff;
+        const NJS_POINT3 opos=link_valid?
+            NJS_POINT3{link.value[12],link.value[13],link.value[14]}:
+            NJS_POINT3{plp.position.x,plp.position.y,plp.position.z};
         NJS_POINT3 pos;
         if(local_offset){
             NJS_POINT3 ps{local_offset->x,0.0f,local_offset->z};
             NJS_MATRIX m;njUnitMatrix(&m);
-            njTranslate(&m,world->player_.position.x,world->player_.position.y,world->player_.position.z);
-            njRotateXYZ(&m,world->player_.pitch,world->player_.yaw,world->player_.roll);
+            njTranslate(&m,plp.position.x,plp.position.y,plp.position.z);
+            njRotateXYZ(&m,plp.pitch,plp.yaw,plp.roll);
             njCalcPoint(&m,&ps,&pos);
             NJS_MATRIX mtx;njUnitMatrix(&mtx);
             njTranslate(&mtx,pos.x,pos.y,pos.z);
-            njRotateXYZ(&mtx,world->player_.pitch,world->player_ayp_,world->player_.roll);
-            std::memcpy(world->player_link_matrix_.value,mtx,sizeof mtx);
-            world->player_link_matrix_valid_=true;
+            njRotateXYZ(&mtx,plp.pitch,world->target_ayp(),plp.roll);
+            std::memcpy(link.value,mtx,sizeof mtx);
+            link_valid=true;
         }else{
-            pos={world->player_.position.x,world->player_.position.y,world->player_.position.z};
+            pos={plp.position.x,plp.position.y,plp.position.z};
         }
-        MotionActor actor=world->motion_actor();
+        MotionActor actor=world->target_motion_actor();
         auto walls=world->collision_geometry();auto steps=world->motion_steps();auto floors=world->motion_floors();
         MotionTerrain terrain{walls,steps,floors,world->floors_,world->room_height_};
         NJS_POINT3 to{pos.x,pos.y,pos.z};const NJS_POINT3 from{opos.x,opos.y,opos.z};
-        const float ar=3.5f;const float ah=world->player_character_?17.5f:16.5f;
+        const float ar=3.5f;const float ah=world->target_character()?17.5f:16.5f;
         resolve_motion_wall(terrain,actor,to,from,ar,ah);
         out_delta->x=to.x-pos.x;out_delta->y=to.y-pos.y;out_delta->z=to.z-pos.z;
         return 1;
@@ -1070,7 +1079,7 @@ void RoomWorld::bind_enemy_services(){
         njRotateY(&m,ay);njCalcVector(&m,&vc1,&vc0);
         njRotateY(&m,r);njCalcVector(&m,&vc1,&vc2);
         const float er=-njInnerProduct(&vc0,&vc2);
-        const auto& pp=world->player_.position;
+        const auto pp=world->target_position(); /* Player 1 or the Player 2 extension, chosen in begin_enemy_pass */
         vc1={pos->x-pp.x,pos->y-pp.y,pos->z-pp.z};njUnitVector(&vc1);
         const float a=njInnerProduct(&vc0,&vc1);
         if(a<er){const float dx=pp.x-pos->x,dz=pp.z-pos->z;int yr=int(10430.381f*std::atan2(-dx,-dz));if(yr==-1)yr=-2;*out=yr;}
@@ -1425,14 +1434,22 @@ void RoomWorld::bind_enemy_services(){
     // then bhEne_CollisionCheckWall2(plp, ps, ops, pd, ar, ah).
     dog.player_collision_parts=[](uint32_t parts_num,uint32_t previous_joint,RECVX_ENEMY_VEC* delta)->int{
         auto* world=enemy_world;if(!world->player_asset_||parts_num>6)return 0;
-        if(previous_joint>=world->player_joint_matrices_.size())return 0;
-        NJS_MATRIX m;njUnitMatrix(&m);njTranslate(&m,world->player_.position.x,world->player_.position.y,world->player_.position.z);njRotateXYZ(&m,world->player_.pitch,world->player_.yaw,world->player_.roll);
-        for(uint32_t i=0;i<parts_num;++i){const auto pose=world->model_pose(0,0,i);njTranslate(&m,pose.position.x,pose.position.y,pose.position.z);njRotateXYZ(&m,pose.angles[0],pose.angles[1],pose.angles[2]);}
-        NJS_POINT3 to{m[12],world->player_.position.y,m[14]};
-        const auto& prev=world->player_joint_matrices_[previous_joint].value;const NJS_POINT3 from{prev[12],world->player_prev_pos_.y,prev[14]};
-        MotionActor actor=world->motion_actor();auto walls=world->collision_geometry();auto steps=world->motion_steps();auto floors=world->motion_floors();
+        const auto& plp=world->target_actor(); /* Player 1 or the Player 2 extension (begin_enemy_pass) */
+        NJS_MATRIX m;njUnitMatrix(&m);njTranslate(&m,plp.position.x,plp.position.y,plp.position.z);njRotateXYZ(&m,plp.pitch,plp.yaw,plp.roll);
+        NJS_POINT3 from;
+        if(world->enemy_target_==1u){const auto& p=*world->player2_;const auto& tree=p.work.own_models.at(0);const auto joints=p.asset->script_nodes(tree.owp_mtx);
+            if(previous_joint>=joints.size())return 0;
+            for(uint32_t i=0;i<parts_num;++i){const auto pose=tree.obj.at(p.asset->model_index(i));njTranslate(&m,pose.position.x,pose.position.y,pose.position.z);njRotateXYZ(&m,pose.angles[0],pose.angles[1],pose.angles[2]);}
+            const auto& prev=joints[previous_joint].value;from={prev[12],plp.position.y,prev[14]}; /* Player 2 keeps no pyb; its root height stands in */
+        }else{
+            if(previous_joint>=world->player_joint_matrices_.size())return 0;
+            for(uint32_t i=0;i<parts_num;++i){const auto pose=world->model_pose(0,0,i);njTranslate(&m,pose.position.x,pose.position.y,pose.position.z);njRotateXYZ(&m,pose.angles[0],pose.angles[1],pose.angles[2]);}
+            const auto& prev=world->player_joint_matrices_[previous_joint].value;from={prev[12],world->player_prev_pos_.y,prev[14]};
+        }
+        NJS_POINT3 to{m[12],plp.position.y,m[14]};
+        MotionActor actor=world->target_motion_actor();auto walls=world->collision_geometry();auto steps=world->motion_steps();auto floors=world->motion_floors();
         MotionTerrain terrain{walls,steps,floors,world->floors_,world->room_height_};
-        const NJS_POINT3 ps=to;const float ar=3.5f,ah=world->player_character_?17.5f:16.5f;
+        const NJS_POINT3 ps=to;const float ar=3.5f,ah=world->target_character()?17.5f:16.5f;
         resolve_motion_wall(terrain,actor,to,from,ar,ah);
         *delta={to.x-ps.x,to.y-ps.y,to.z-ps.z};return 1;};
     // rom->walp[0..wal_n-1] then sys->mwalp[0..mwal_n-1]; wal_count takes the
@@ -1538,6 +1555,7 @@ const MotionClip* RoomWorld::player_enemy_clip()const{
 // SetPlyMtn mit add 0). Rueckgabe wie bhSetMotion (-1/0/1); -2 = Clip fehlt (gemeldet).
 int RoomWorld::player_set_motion_now(int add,const MotionClip*& clip){
     clip=nullptr;
+    if(enemy_target_==1u)return player2_set_motion_now(add,clip);
     if(player_enemy_motion_)clip=player_enemy_clip();
     else if(player_asset_&&player_asset_->has_motion(motion_))clip=&player_asset_->motion_clip(motion_);
     if(!clip){unbound_enemy_.insert(player_enemy_motion_?"bhSetMotion(plp): mnwP[mtn_no] des Gegners fehlt":"bhSetMotion(plp): mnwPb[mtn_no] fehlt");return -2;}
@@ -2074,7 +2092,15 @@ void RoomWorld::control_enemy_works(){
             const auto hit=enemy_world->collision_contact({pos->x,pos->y,pos->z},flags,r,h);if(!hit)return 0;
             if(out)*out=atr_of(*hit);return 1;},common.enemy_atari_atr,
         [](RECVX_ENEMY_VEC* out)->int{
-            auto* world=enemy_world;const MotionClip* clip=world->player_enemy_motion_?world->player_enemy_clip():
+            auto* world=enemy_world;
+            if(world->enemy_target_==1u){ /* the Player 2 extension: same bhSetMotion(plp) and chain 0..5 on its own tree */
+                const MotionClip* clip2=nullptr;if(world->player2_set_motion_now(0,clip2)==-2)return 0;
+                const auto& p=*world->player2_;const auto& plp=p.work.transform;const auto& obj=p.work.own_models.at(0).obj;
+                if(obj.size()<6){world->player2_gaps_.insert("EN09 PlayerLink: Player 2 chain 0..5");return 0;}
+                NJS_MATRIX matrix;njUnitMatrix(&matrix);njTranslate(&matrix,plp.position.x,plp.position.y,plp.position.z);njRotateXYZ(&matrix,plp.pitch,plp.yaw,plp.roll);
+                for(unsigned j=0;j<6;++j){const auto& node=obj[j];njTranslate(&matrix,node.position.x,node.position.y,node.position.z);njRotateXYZ(&matrix,node.angles[0],node.angles[1],node.angles[2]);}
+                *out={matrix[12],matrix[13],matrix[14]};return 1;}
+            const MotionClip* clip=world->player_enemy_motion_?world->player_enemy_clip():
                 (world->player_asset_&&world->player_asset_->has_motion(world->motion_)?&world->player_asset_->motion_clip(world->motion_):nullptr);
             if(!clip){world->unbound_enemy_.insert("EN09 PlayerLink: mnwP fehlt");return 0;}
             MotionWork m{int32_t(world->frame_),0,world->player_hokan_count_,0,world->player_hokan_rate_};std::string gap;
@@ -2847,6 +2873,7 @@ void RoomWorld::control_enemy_works(){
     run_pending_sand();
     const unsigned enemy_sp_flg = enemy_ai_ ? simulation_flags_ : (simulation_flags_ & ~2u);
     recvx_enemy_control(&enemy_table_,&enemy_dispatch_,enemy_sp_flg,&enemy_services_);
+    enemy_target_=0; /* outside the enemy pass every caller sees Player 1 */
     recvx_en04_set_context(nullptr);
     recvx_en01_set_context(nullptr);
     recvx_en14_bind_services(nullptr);

@@ -1,4 +1,5 @@
 #include "frontend.h"
+#include "netplay.h"
 #include <stdexcept>
 #include "back_color.h"
 #include <algorithm>
@@ -8,7 +9,7 @@
 namespace recvx {
 namespace {
 // Host settings screen (replaces the unported Adv_GameOptionScreen; see frontend.h).
-const char* const labels[]={"Forward","Back","Turn left","Turn right","Run","Inventory","OK / Action","Cancel","Menu up","Menu down","Menu left","Menu right","Skip video","Pause","Quit game","Wireframe","Aim","Attack / Fire","Next target","Select (skip scene)"};
+const char* const labels[]={"Forward","Back","Turn left","Turn right","Run","Inventory","OK / Action","Cancel","Menu up","Menu down","Menu left","Menu right","Skip video","Pause","Quit game","Wireframe","Aim","Attack / Fire","Next target","Select (skip scene)","Trade with partner"};
 static_assert(sizeof(labels)/sizeof(*labels)==action_count,"one label per input action");
 void panel(SoftwareRenderer& image,int x,int y,int w,int h){for(int j=y;j<y+h;++j)for(int i=x;i<x+w;++i){auto& pixel=image.canvas()[j*image.width()+i];pixel=0xff000000|((pixel&0xfcfcfc)>>2);}}
 std::string percent(float value){return std::to_string(int(std::round(value*100)))+" %";}
@@ -73,12 +74,13 @@ void Frontend::check_button(){
         else if(cursor_moves_>0){cursor_=std::min(cursor_+1,last);if(sound)sound(2);} // Rept & 0x4000 (pad down): Cursor++, clamp
     }
     if(ok_pressed_){ // press & 0x800 (Start) || press & AdvGetOkButton()
-        const int command=cursor_==quit_row?4:mode_command_id_[cursor_];
+        const int command=row_command(cursor_);
         switch(command){
         case 0: if(sound)sound(3);from_title_=1;title_call(3);break;        // LOAD GAME (adv.c:1953 FromTitle 1): system.c:374 ss_flg 0x200, tk_flg 0x308040, typ_md0 0 -> Ladebildschirm
         case 1: from_title_=0;title_call(2);break;                          // NEW GAME: AppMode 1, sys->gm_mode 0, TitleCall(PortId, 2)
         case 2: from_title_=2;next_return_code_=4;mode_=17;if(sound)sound(3);request_adv_fade(3,samurai(50));break; // OPTION: AppMode 0
         case 3: from_title_=3;title_call(6);break;                          // BATTLE GAME (ExtraFlag): sys->gm_mode 3, TitleCall(PortId, 6)
+        case 5: screen_=Screen::Multiplayer;selected_=0;if(sound)sound(3);break;
         case 4: from_title_=2;next_return_code_=100;mode_=17;if(sound)sound(3);request_adv_fade(3,samurai(50));break; // host QUIT: OPTION leave path
         }
     }else if(cancel_pressed_){next_mode_=5;mode_=10;if(sound)sound(0);}     // CancelNextMode[0] 5, CancelMode[0] 10
@@ -93,7 +95,7 @@ void Frontend::title_frame(){ // adv.c:2048 Adv_BioCvTitle, one 30-Hz frame
         // adv.c:2114: sys->ssd_flg & 1 (Rangliste, ranking.c RankingInit) setzt ExtraFlag. Der Systemspeicher ist portiert
         // (system_data.h), TitleCall(6) und das Battle Game (gm_mode 3) nicht: ExtraFlag bleibt deshalb 0.
         if(extra_flag_){cursor_max_=4;mode_command_id_[0]=0;mode_command_id_[1]=1;mode_command_id_[2]=3;mode_command_id_[3]=2;cursor_=from_title_==3?2:from_title_==2?3:0;}
-        else{cursor_max_=3;mode_command_id_[0]=0;mode_command_id_[1]=1;mode_command_id_[2]=2;mode_command_id_[3]=3;cursor_=from_title_==2?2:0;}
+        else{cursor_max_=quit_row;mode_command_id_[0]=0;mode_command_id_[1]=1;mode_command_id_[2]=2;mode_command_id_[3]=3;cursor_=from_title_==2?2:0;}
         mode_=1;break;
     case 1: mode_=2;break; // ss_flg |= 0x20000; Pad.Flag 1; RequestAdvInsideFileEx(2,0): ADV/0002 is read by GameUi::title_texture
     case 2: mode_=3;break; // CheckReadEndAdvInsideFile2(3): the host read completes at once
@@ -150,6 +152,7 @@ FrontendCommand Frontend::input(MenuInput key,bool pad){
         else if(key==MenuInput::Confirm)start_pressed_=ok_pressed_=true;else if(key==MenuInput::Cancel)cancel_pressed_=true;
         return FrontendCommand::None;
     }
+    if(multiplayer())return multiplayer_input(key);
     return controls_input(key,pad);
 }
 FrontendCommand Frontend::apply(const InputFrame& frame){
@@ -161,7 +164,7 @@ FrontendCommand Frontend::apply(const InputFrame& frame){
         if(frame.hit(Action::Confirm))input(MenuInput::Confirm,frame.gamepad_input);
         return title_step();
     }
-    if(screen_!=Screen::Controls)return FrontendCommand::None;
+    if(screen_!=Screen::Controls&&!multiplayer())return FrontendCommand::None;
     if(suppress_){suppress_=false;return FrontendCommand::None;}if(capture_)return FrontendCommand::None;
     if(frame.hit(Action::Cancel))return input(MenuInput::Cancel,frame.gamepad_input);
     if(frame.hit(Action::Quit))return FrontendCommand::Quit;
@@ -199,7 +202,9 @@ FrontendCommand Frontend::controls_input(MenuInput key,bool pad){
     if(key==MenuInput::Confirm){if(selected_<action_count)arm();else if(selected_==action_count+2)commit(InputConfig::defaults());else if(selected_==back_row)back_to_title();}
     return FrontendCommand::None;
 }
-void Frontend::event(const SDL_Event& event){if(!capture_)return;
+void Frontend::event(const SDL_Event& event){
+    if(lobby_event(event))return;
+    if(!capture_)return;
     if(event.type==SDL_KEYDOWN&&!event.key.repeat&&event.key.keysym.scancode==SDL_SCANCODE_ESCAPE){capture_=false;suppress_=true;status_="Cancelled";return;}
     InputBinding binding{InputBinding::Kind::Key,0,1};bool accepted=false;
     if(!gamepad_&&event.type==SDL_KEYDOWN&&!event.key.repeat&&event.key.keysym.scancode>0){binding.code=event.key.keysym.scancode;accepted=true;}
@@ -211,7 +216,7 @@ void Frontend::event(const SDL_Event& event){if(!capture_)return;
     if(!accepted)return;auto candidate=config_;auto& bindings=candidate.bindings[selected_];
     if(selected_==unsigned(Action::Confirm)||selected_==unsigned(Action::Cancel)){
         auto& opposite=candidate.bindings[unsigned(selected_==unsigned(Action::Confirm)?Action::Cancel:Action::Confirm)];
-        const auto before=opposite.size();opposite.erase(std::remove_if(opposite.begin(),opposite.end(),[&](const InputBinding& b){return b.kind==binding.kind&&b.code==binding.code&&b.direction==binding.direction;}),opposite.end());
+        const auto before=opposite.size();opposite.erase(std::remove_if(opposite.begin(),opposite.end(),[&](const InputBinding& b){return b.kind==binding.kind&&b.code==binding.code&&b.direction==binding.direction&&b.modifier==binding.modifier;}),opposite.end());
         if(opposite.size()!=before&&!std::any_of(opposite.begin(),opposite.end(),[&](const InputBinding& b){return (b.kind!=InputBinding::Kind::Key)==gamepad_;}))
             for(const auto& b:bindings)if((b.kind!=InputBinding::Kind::Key)==gamepad_)opposite.push_back(b);
     }
@@ -231,10 +236,10 @@ void Frontend::draw_title(SoftwareRenderer& image,GameUi& ui)const{
         // fourth row QUIT uses it too so no plate overlaps the copyright plate at y 396.
         const int table=extra_flag_?1:0,rows=cursor_max_+1>3?1:0;
         const unsigned alpha=view_.plate_fade?unsigned(int(view_.flush)+int(view_.flush2))&0xffu:0xffu,shadow=unsigned(view_.flush)&0xffu; // Flag 0: 0xFF000000
-        for(unsigned i=0;i<cursor_max_;++i)quad_s(image,atlas,64,pos_y[rows][i],513,33,0,v_def[table][i],513,33,(alpha<<24)|(i==cursor_?view_.font_base:0x7f7f7fu),shadow);
+        for(unsigned i=0;i<title_rows;++i)quad_s(image,atlas,64,240+int(i)*32,513,33,0,v_def[table][i],513,33,(alpha<<24)|(i==cursor_?view_.font_base:0x7f7f7fu),shadow);
         // Host QUIT row (deviation, documented in frontend.h): original system font, same colours/shadow, centred like the 513-wide plates.
-        const std::string text="QUIT";const float scale=1.f;const int x=64+(513-ui.label_width(text,scale))/2,y=extra_flag_?pos_y[1][3]+32:pos_y[rows][3];
-        ui.label(image,text,x+3,y+3,scale,shadow<<24);ui.label(image,text,x,y,scale,(alpha<<24)|(cursor_==quit_row?view_.font_base:0x7f7f7fu));
+        for(unsigned row:{multiplayer_row,quit_row}){const std::string text=row==multiplayer_row?"MULTIPLAYER":"QUIT";const float scale=1.f;const int x=64+(513-ui.label_width(text,scale))/2,y=240+int(row)*32;
+            ui.label(image,text,x+3,y+3,scale,shadow<<24);ui.label(image,text,x,y,scale,(alpha<<24)|(cursor_==row?view_.font_base:0x7f7f7fu));}
     }
     if(view_.flash)fill(image,0xffffff,view_.flash);                               // Mode 17 GenFlag: white polygon, alpha FlushCount
     if(view_.fade)fill(image,0x000000,unsigned(255.f*view_.fade_rate)&0xffu);      // AdvDrawFadePolygon(0, FadeRate, 0)
@@ -251,7 +256,30 @@ std::string Frontend::presentation_row_value(unsigned row)const{
 }
 void Frontend::draw(SoftwareRenderer& image,GameUi& ui,std::size_t controllers){
     if(screen_==Screen::Title){draw_title(image,ui);return;}
-    if(screen_!=Screen::Controls)return;
+    if(multiplayer()){
+        ui.draw_title(image);panel(image,12,176,616,300);
+        auto line=[&](const std::string& text,int y,unsigned color=0xffbfbfbf){ui.label(image,text,(640-ui.label_width(text,.65f))/2,y,.65f,color,.65f);};
+        line(lobby()?"LOBBY":"MULTIPLAYER",184,0xffffffff);
+        std::vector<std::string> entries=lobby()?std::vector<std::string>{lobby_host?"CREATE LOBBY":"JOIN LOBBY",lobby_host?(lobby_player2?"HOST: PLAYER 2 / GUEST: PLAYER 1":"HOST: PLAYER 1 / GUEST: PLAYER 2"):"PLAYER: ASSIGNED BY HOST","ADDRESS / PHRASE",lobby_busy?"CONNECTING...":"CONNECT",std::string(lobby_tool_==0?"COPY ADDRESS":lobby_tool_==1?"COPY PHRASE":lobby_tool_==2?"PASTE ADDRESS":"CLEAR ADDRESS")+"  (L/R)","BACK"}:std::vector<std::string>{"SOLO","LOBBY","BACK"};
+        for(unsigned i=0;i<entries.size();++i)line(entries[i],210+int(i)*23,i==selected_?0xffffffff:0xff7f7f7f);
+        if(lobby()){
+            std::size_t first=0;
+            const auto cursor=std::min<std::size_t>(lobby_character_,lobby_address.size());
+            if(lobby_edit_)while(first<cursor&&ui.label_width(lobby_address.substr(first,cursor-first),.55f)>560)++first;
+            std::string address=lobby_address.substr(first);
+            while(ui.label_width(address,.55f)>584&&!address.empty())address.pop_back();
+            ui.label(image,address,24,350,.55f,0xffffffff,.55f);
+            if(lobby_edit_){
+                const int x=24+ui.label_width(address.substr(0,std::min(cursor-first,address.size())),.55f);
+                for(int y=348;y<366;++y)for(int dx=0;dx<2;++dx)image.canvas()[y*image.width()+x+dx]=0xffffffff;
+                if(lobby_select_all_)for(int x=24;x<24+ui.label_width(address,.55f);++x)image.canvas()[368*image.width()+x]=0xffffffff;
+            }
+            try{const auto phrase=Netplay::phrase(lobby_address);const auto split=phrase.find(' ',phrase.size()/2);ui.label(image,phrase.substr(0,split),24,376,.5f,0xffbfbfbf,.5f);if(split!=std::string::npos)ui.label(image,phrase.substr(split+1),24,398,.5f,0xffbfbfbf,.5f);}catch(const std::exception&){}
+            ui.label(image,lobby_status.substr(0,95),24,428,.4f,0xffffc080,.4f);
+            ui.label(image,lobby_edit_?"Type / paste; pad: left/right cursor, up/down letter; OK save, Cancel undo":"Ctrl/Cmd+C: IP, Shift+C: phrase, V: paste. Clipboard row also works on pad.",24,454,.35f,0xffbfbfbf,.35f);
+        }return;
+    }
+    if(screen_!=Screen::Controls&&!multiplayer())return;
     ui.draw_title(image);
     panel(image,10,10,620,462);ui.label(image,"OPTION",26,14,.9f,0xffffffff,.9f);ui.label(image,gamepad_?"Controller":"Keyboard",26,44,.65f,0xffffffff,.65f);
     ui.label(image,std::to_string(controllers)+(controllers==1?" controller connected":" controllers connected"),342,49,.48f,0xffffffff,.48f);
@@ -274,5 +302,69 @@ void Frontend::draw(SoftwareRenderer& image,GameUi& ui,std::size_t controllers){
     if(capture_){panel(image,28,188,584,96);ui.label(image,gamepad_?"Press a controller button or move a stick":"Press a new keyboard key",48,209,.68f,0xffffffff,.68f);ui.label(image,"Escape: cancel",48,243,.58f,0xffffffff,.58f);}
     ui.label(image,status_.empty()?(selected_==action_count||selected_==action_count+1||selected_==third_person_row||selected_==video_row||selected_==frame_rate_row||selected_==upscaler_row||selected_==frame_generation_row||selected_==sharpness_row||selected_==post_process_row||selected_==widescreen_row||selected_==audio_row?"Left/Right: change value":"OK: rebind; Left/Right: keyboard/controller"):status_,22,450,.45f,0xffffffff,.45f);
     ui.label(image,"Back: "+config_.describe(Action::Cancel,false)+" / "+config_.describe(Action::Cancel,true),22,465,.45f,0xffffffff,.45f);
+}
+}
+
+namespace recvx {
+FrontendCommand Frontend::multiplayer_input(MenuInput key){
+    if(sound)sound(key==MenuInput::Cancel?0:key==MenuInput::Confirm?3:2);
+    if(lobby_edit_){
+        if(key==MenuInput::Confirm||key==MenuInput::Cancel){if(key==MenuInput::Cancel)lobby_address=lobby_edit_before_;lobby_select_all_=false;lobby_edit_=false;SDL_StopTextInput();return FrontendCommand::None;}
+        lobby_select_all_=false;
+        if(key==MenuInput::Left&&lobby_character_)--lobby_character_;
+        if(key==MenuInput::Right)lobby_character_=std::min<unsigned>(lobby_character_+1,unsigned(lobby_address.size()));
+        if(key==MenuInput::Up||key==MenuInput::Down){const std::string chars="0123456789.: abcdefghijklmnopqrstuvwxyz-";if(lobby_character_==lobby_address.size()&&lobby_address.size()<120)lobby_address+='0';if(lobby_character_<lobby_address.size()){auto n=chars.find(lobby_address[lobby_character_]);if(n==std::string::npos)n=0;lobby_address[lobby_character_]=chars[(n+chars.size()+(key==MenuInput::Up?1:-1))%chars.size()];}}
+        return FrontendCommand::None;
+    }
+    if(key==MenuInput::Cancel||(key==MenuInput::Confirm&&selected_==(lobby()?5u:2u))){if(lobby()){if(leave_lobby)leave_lobby();screen_=Screen::Multiplayer;selected_=1;}else{screen_=Screen::Title;mode_=8;cursor_=multiplayer_row;}return FrontendCommand::None;}
+    if(key==MenuInput::Up&&selected_)--selected_;
+    if(key==MenuInput::Down)selected_=std::min(selected_+1,lobby()?5u:2u);
+    if(!lobby()){if(key==MenuInput::Confirm){if(selected_==0){if(solo_with_npc)solo_with_npc();screen_=Screen::Title;mode_=8;cursor_=new_game_cursor;}else if(selected_==1){screen_=Screen::Lobby;selected_=0;lobby_status.clear();if(!lobby_address_initialized_){lobby_address=Netplay::local_address()+":"+std::to_string(Netplay::default_port);lobby_address_initialized_=true;}}}return FrontendCommand::None;}
+    if(lobby_busy&&selected_!=4)return FrontendCommand::None;
+    if(key==MenuInput::Left||key==MenuInput::Right||key==MenuInput::Confirm){if(selected_==4){if(key==MenuInput::Confirm)lobby_clipboard(lobby_tool_);else lobby_tool_=(lobby_tool_+4+(key==MenuInput::Right?1:-1))%4;}else if(selected_==0)lobby_host=!lobby_host;else if(selected_==1&&lobby_host)lobby_player2=!lobby_player2;else if(selected_==2&&key==MenuInput::Confirm){lobby_edit_=true;lobby_edit_before_=lobby_address;lobby_select_all_=false;lobby_character_=unsigned(lobby_address.size());SDL_StartTextInput();}else if(selected_==3&&key==MenuInput::Confirm&&connect_lobby)connect_lobby(lobby_host,lobby_player2,lobby_address);}
+    return FrontendCommand::None;
+}
+}
+
+namespace recvx {
+void Frontend::lobby_clipboard(unsigned action){
+    if(lobby_busy&&action>=2){lobby_status="Cancel the connection before changing the address";return;}
+    try{
+        if(action==3){lobby_address.clear();lobby_character_=0;lobby_select_all_=false;lobby_status="Address cleared";return;}
+        if(action==2){char* raw=SDL_GetClipboardText();if(!raw)throw std::runtime_error("Clipboard is unavailable");std::string text(raw);SDL_free(raw);
+            const auto first=text.find_first_not_of(" \r\n\t"),last=text.find_last_not_of(" \r\n\t");text=first==std::string::npos?std::string():text.substr(first,last-first+1);
+            if(text.size()>120)throw std::runtime_error("Clipboard address is too long");
+            (void)Netplay::endpoint(text);lobby_address=text;lobby_character_=unsigned(text.size());lobby_select_all_=false;lobby_status="Address pasted";return;}
+        const auto endpoint=Netplay::endpoint(lobby_address);const auto address=endpoint.first+":"+std::to_string(endpoint.second);
+        const auto text=action==1?Netplay::phrase(address):address;
+        if(SDL_SetClipboardText(text.c_str())!=0)throw std::runtime_error("Clipboard is unavailable");lobby_status=action==1?"Address phrase copied":"IP address and port copied";
+    }catch(const std::exception& error){lobby_status=error.what();}
+}
+bool Frontend::lobby_event(const SDL_Event& event){
+    if(!lobby())return false;
+    if(event.type==SDL_KEYDOWN&&!event.key.repeat&&(event.key.keysym.mod&(KMOD_CTRL|KMOD_GUI))){
+        if(event.key.keysym.scancode==SDL_SCANCODE_C){lobby_clipboard(event.key.keysym.mod&KMOD_SHIFT?1:0);return true;}
+        if(event.key.keysym.scancode==SDL_SCANCODE_V){lobby_clipboard(2);return true;}
+        if(lobby_edit_&&event.key.keysym.scancode==SDL_SCANCODE_A){lobby_select_all_=true;return true;}
+    }
+    if(!lobby_edit_)return false;
+    if(event.type==SDL_TEXTINPUT){
+        const std::string text(event.text.text);if(text.find_first_not_of("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.:- ")==std::string::npos){
+            if((lobby_select_all_?0:lobby_address.size())+text.size()<=120){if(lobby_select_all_){lobby_address.clear();lobby_character_=0;}lobby_character_=std::min<unsigned>(lobby_character_,unsigned(lobby_address.size()));lobby_address.insert(lobby_character_,text);lobby_character_+=unsigned(text.size());lobby_select_all_=false;}
+            else lobby_status="Address is limited to 120 characters";
+        }else lobby_status="Use an IPv4 address or the address phrase";return true;
+    }
+    if(event.type==SDL_KEYUP)return true;
+    if(event.type!=SDL_KEYDOWN)return false;
+    const auto code=event.key.keysym.scancode;
+    if(code==SDL_SCANCODE_RETURN||code==SDL_SCANCODE_KP_ENTER)multiplayer_input(MenuInput::Confirm);
+    else if(code==SDL_SCANCODE_ESCAPE)multiplayer_input(MenuInput::Cancel);
+    else if(code==SDL_SCANCODE_LEFT)multiplayer_input(MenuInput::Left);
+    else if(code==SDL_SCANCODE_RIGHT)multiplayer_input(MenuInput::Right);
+    else if(code==SDL_SCANCODE_HOME){lobby_character_=0;lobby_select_all_=false;}
+    else if(code==SDL_SCANCODE_END){lobby_character_=unsigned(lobby_address.size());lobby_select_all_=false;}
+    else if(code==SDL_SCANCODE_DELETE||(code==SDL_SCANCODE_BACKSPACE&&lobby_select_all_)){lobby_address.clear();lobby_character_=0;lobby_select_all_=false;}
+    else if(code==SDL_SCANCODE_BACKSPACE&&lobby_character_){lobby_address.erase(--lobby_character_,1);}
+    return true; // letter keys belong only to SDL_TEXTINPUT, never gameplay/menu bindings
 }
 }

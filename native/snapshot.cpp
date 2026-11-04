@@ -5,7 +5,7 @@
 namespace recvx {
 namespace {
 constexpr char magic[8]={'R','C','V','X','S','N','A','P'};
-constexpr std::uint32_t format=2;  // 1: ohne room_sound_case (wird weiter gelesen)
+constexpr std::uint32_t format=3;  // 1: ohne room_sound_case, 2: ohne Zweispielerblock (beide werden weiter gelesen)
 struct Writer {
     std::vector<std::uint8_t> out;
     void u8(std::uint32_t v){out.push_back(std::uint8_t(v));}
@@ -126,6 +126,8 @@ void write_snapshot(const std::filesystem::path& path,const Snapshot& snap){
     w.u32(h.body);for(const auto& m:h.session_flags)w.words(m);for(auto v:h.session_values)w.u32(v);
     w.u32(std::uint32_t(h.max_hp));w.u8(h.poisoned);w.u8(h.infected);w.u8(h.side_pack);
     w.u8(h.room_sound_case); // Format 2
+    w.u8(h.two_players); // Format 3: optional host two-player block
+    if(h.two_players){w.u8(std::uint8_t(h.player2_mode));w.u8(std::uint8_t(h.player2_model));w.u32(std::uint32_t(h.player2_hp));w.u8(h.player2_poisoned);w.u8(std::uint8_t(h.player2_weapon));w.words(h.player2_items);}
     w.u32(crc32(w.out.data(),w.out.size()));
     if(path.has_parent_path())std::filesystem::create_directories(path.parent_path());
     auto temporary=path;temporary+=".tmp";
@@ -139,13 +141,16 @@ Snapshot read_snapshot(const std::filesystem::path& path){
     if(bytes.size()<16||std::memcmp(bytes.data(),magic,8))throw std::runtime_error("not a RECVX snapshot");
     Reader tail{bytes,bytes.size()-4};if(tail.u32()!=crc32(bytes.data(),bytes.size()-4))throw std::runtime_error("snapshot checksum mismatch");
     bytes.resize(bytes.size()-4);Reader r{bytes,8};
-    const auto file_format=r.u32();if(file_format!=1&&file_format!=format)throw std::runtime_error("unsupported snapshot format");
+    const auto file_format=r.u32();if(file_format<1||file_format>format)throw std::runtime_error("unsupported snapshot format");
     if(r.u32()!=SaveFile::size)throw std::runtime_error("snapshot SAVEFILE size mismatch");
     r.need(SaveFile::size);Snapshot snap;snap.save=SaveFile::decode({bytes.begin()+std::ptrdiff_t(r.at),bytes.begin()+std::ptrdiff_t(r.at+SaveFile::size)});r.at+=SaveFile::size;
     auto& h=snap.host;const auto length=r.u32();if(length>64)throw std::runtime_error("snapshot room name invalid");r.need(length);h.room.assign(bytes.begin()+std::ptrdiff_t(r.at),bytes.begin()+std::ptrdiff_t(r.at+length));r.at+=length;
     h.body=r.u32();for(auto& m:h.session_flags)r.words(m);for(auto& v:h.session_values)v=r.u32();
     h.max_hp=int(r.u32());h.poisoned=r.u8();h.infected=r.u8();h.side_pack=r.u8();
     if(file_format>=2){h.room_sound_case=r.u8();if(h.room_sound_case>15)throw std::runtime_error("snapshot room sound case invalid");}
+    if(file_format>=3){h.two_players=r.u8()!=0;
+        if(h.two_players){h.player2_mode=r.u8();h.player2_model=r.u8();h.player2_hp=int(std::int32_t(r.u32()));h.player2_poisoned=r.u8()!=0;h.player2_weapon=r.u8();r.words(h.player2_items);
+            if(h.player2_mode<1||h.player2_mode>2||h.player2_model<10||h.player2_model>14)throw std::runtime_error("snapshot two-player block invalid");}}
     if(r.at!=bytes.size())throw std::runtime_error("snapshot has trailing data");
     if(snap.save.version!=10)throw std::runtime_error("snapshot SAVEFILE version is not 10");
     return snap;

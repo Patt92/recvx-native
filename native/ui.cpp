@@ -872,6 +872,37 @@ void GameUi::quantity(SoftwareRenderer& image,std::uint32_t packed,int x,int y,b
         ++column;drawn=true;
     }
 }
+void GameUi::draw_trade(SoftwareRenderer& image,const Inventory& primary,const Inventory& partner,bool npc,unsigned pane,std::array<unsigned,2> cells,bool selecting,unsigned source_pane,unsigned source_cell,const std::string& note)const{
+    rectangle(image,0,0,image.width(),image.height(),0xff090f12);
+    const int origin=std::max(0,(image.width()-640)/2);
+    label(image,"ITEM EXCHANGE",origin+24,18,.85f,0xffdbe9df,.85f);
+    label(image,selecting?"Choose a destination":"Choose an item",origin+26,52,.5f,0xff91b6b7,.5f);
+    const Inventory* inventories[]={&primary,&partner};
+    for(unsigned side=0;side<2;++side){
+        const auto& inventory=*inventories[side];const int left=origin+24+int(side)*304;
+        rectangle(image,left-2,88,288,300,pane==side?0xff355d65:0xff26343a);
+        rectangle(image,left,90,284,296,0xff101c22);
+        label(image,side?(npc?"NPC PARTNER":"PLAYER 2"):"PLAYER 1",left+12,96,.6f,pane==side?0xffe0ebbb:0xffa6b7b6,.6f);
+        label(image,"HP "+std::to_string(inventory.hp)+"  "+(inventory.infected?std::string("Infected"):inventory.condition())+"  SPACE "+std::to_string(inventory.occupied())+"/"+std::to_string(inventory.capacity()),left+12,126,.4f,0xff9fb6b1,.4f);
+        unsigned cell=0,chosen=0;
+        for(unsigned slot=2;cell<inventory.capacity()&&slot<12;++slot){
+            const auto packed=inventory.slots()[slot];const auto id=Inventory::id(packed);const bool wide=id<156&&(itemdata[id].type&0x100u);const unsigned width=wide?2u:1u;
+            const int x=left+12+int(cell%2)*130,y=154+int(cell/2)*44,w=int(width)*130-4;
+            const bool selected=cells[side]>=cell&&cells[side]<cell+width;
+            const bool source=selecting&&side==source_pane&&source_cell>=cell&&source_cell<cell+width;
+            const auto border=source?0xffd4b95f:pane==side&&selected?0xffa2dadd:0xff31464b;
+            rectangle(image,x,y,w,42,border);rectangle(image,x+2,y+2,w-4,38,0xff17262c);
+            if(id&&id<156){const int icon_width=wide?112:56;icon(image,id,x+(w-icon_width)/2,y+1,38,56);quantity(image,packed,x+w-44,y+1,true);}
+            if(slot==inventory.slots()[0]&&id)label(image,"E",x+4,y+1,.4f,0xffd5dba5,.4f);
+            if(selected)chosen=id;cell+=width;
+        }
+        std::string name=chosen?item_name(chosen):"Empty";
+        while(!name.empty()&&label_width(name,.46f)>260)name.pop_back();
+        label(image,name,left+12,394,.46f,0xffdbe9df,.46f);
+    }
+    label(image,note.empty()?(selecting?"OK: place / stack / swap    Back: cancel selection":"OK: select    Left/Right: move between inventories"):note,origin+26,426,.43f,0xffd4dba8,.43f);
+    label(image,"Aim: partner item actions    Inventory / Trade: close",origin+26,454,.4f,0xff94aca9,.4f);
+}
 void GameUi::draw_box(SoftwareRenderer& image,const Inventory& inv,const StatusMenu& menu,unsigned base,unsigned index,bool selecting,const StatusSlide* slide,unsigned exit_state,unsigned note,float row_shift,unsigned arrows,unsigned cursor_cell)const{
     rectangle(image,0,0,640,480,0xff101010);
     // Slide offsets of the original cen_pos centers relative to the settled layout (sub1.c SpriteH).

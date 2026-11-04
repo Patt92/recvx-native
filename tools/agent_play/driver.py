@@ -741,6 +741,13 @@ class Driver:
         warn = [l for l in self.box_lines(obs, d) if l.startswith('YOU CARRY NO GUN')] if obs.get('room') else []
         out += warn
         out += self.combat_lines(obs)
+        if obs.get('player_ai'):
+            decision, target = obs['player_ai']
+            if decision in ('attack', 'aim', 'approach-enemy'):
+                out.append(f'The game fights for you right now (Player AI: {decision} enemy #{target}); your fire '
+                           'or move commands would take over.')
+            elif decision in ('no-ammo', 'unarmed'):
+                out.append(f'Player AI cannot fight ({decision}): reload, equip a weapon or leave.')
         if self.reflex_log:
             out.append('The driver acted for you since your last decision (reflexes): ' + '; '.join(self.reflex_log) + '.')
             self.reflex_log = []
@@ -2476,6 +2483,10 @@ class Driver:
         if owner == 'GRAB' or owner.split()[:1] == ['GRAB']:
             return dict(op='shake', presses=20)
         if owner != 'FREE':
+            return None
+        if (d.get('player_ai') or {}).get('on'):
+            # The runtime fights nearby visible enemies itself (Player AI, default for AI play); a driver
+            # fight line would only pre-empt it. Grab shaking above stays with the driver.
             return None
         valid = {e['index'] for e in threats(d)}
         near = [e for e in (obs.get('enemies') or []) if e['i'] in valid and e.get('state') in ('active', 'grabbing')

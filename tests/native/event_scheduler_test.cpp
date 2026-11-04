@@ -27,6 +27,13 @@ std::vector<std::uint8_t> fixture(const std::vector<std::uint8_t>& first,
 int main(){unsigned failures=0,checks=0;
     auto test=[&](const char* name,const std::function<void()>& body){++checks;try{body();std::cout<<"PASS "<<name<<'\n';}
         catch(const std::exception& e){++failures;std::cerr<<"FAIL "<<name<<": "<<e.what()<<'\n';}};
+    test("host companion distinguishes scripted DoorCall from a physical door",[]{
+        Inventory inventory;MessageDialog dialog;EventVm script(fixture({0x33,0,0,0,0,5,1,2,0xff,0}),inventory,dialog);
+        bool called=false;script.door=[&](const DoorRequest& request){called=request.scripted&&request.stage==0&&request.room==5&&request.spawn==1&&request.type==2;return true;};
+        script.start(0,0);script.tick();check(called&&script.errors.empty(),"scripted door provenance lost");
+        EventVm physical(fixture({0xff,0}),inventory,dialog);physical.interactions={Interaction{1,0,0,0,{-5,0,-6},{10,0,10},{0,5,1,2}}};
+        called=false;physical.door=[&](const DoorRequest& request){called=!request.scripted&&request.room==5&&request.spawn==1;return true;};
+        check(physical.interact({0,0,0},0,0)&&called,"physical door became an event teleport");});
     test("bhSv 16 writes player floor without corrupting floor trigger index",[]{
         Inventory inv;MessageDialog dialog;EventVm vm(fixture({8,16,2,0,0xff,0}),inv,dialog);
         unsigned floor=0;vm.values[16]=7;vm.set_player_floor=[&](unsigned value){floor=value;};

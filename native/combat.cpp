@@ -180,6 +180,7 @@ struct CombatOriginal {
 // bhCPM1_act_atk (player.c:4481) verteilt auf plp->mode2; bhCPM2_act_suw
 // (player.c:4545) und die übrigen mode2-Zweige schalten auf plp->mode3.
 unsigned CombatController::original_mode()const{return original_?unsigned(original_->player().mode2):0;}
+bool CombatController::locked_target()const{return original_&&original_->result.active&&((original_->result.flg&0x100000u)||original_->result.locked>0);}
 unsigned CombatController::original_phase()const{return original_?unsigned(original_->player().mode3):0;}
 // player.c:1809/1815: der Pass gehört bhCPM1_act_atk genau bei mode1 != 0.
 bool CombatController::aiming()const{return original_&&original_->result.active;}
@@ -196,7 +197,7 @@ ModelNodeOverrides CombatController::pose_overrides(const PlayerAsset&,std::size
         out[original_->script_to_model[n]]={NJS_POINT3{o.pos[0],o.pos[1],o.pos[2]},std::array<Angle,3>{Angle(o.ang[0]),Angle(o.ang[1]),Angle(o.ang[2])}};}
     return out;
 }
-bool CombatController::tick(CombatControls input,bool blocked,Inventory& inventory,PlayerAsset& player,SceneSpawn& actor,std::size_t& motion,std::int64_t& frame,RoomWorld* world,AudioMixer& audio,EventVm* events){
+bool CombatController::tick(CombatControls input,bool blocked,Inventory& inventory,PlayerAsset& player,SceneSpawn& actor,std::size_t& motion,std::int64_t& frame,RoomWorld* world,AudioMixer& audio,EventVm* events,CombatActorBinding* binding){
     body_=&player;
     const auto weapon=inventory.weapon();const bool reload=inventory.take_weapon_reload();
     // dread.c:170 bhReadWeaponData ersetzt obwp[0]/[1] und die Waffenmotions nur auf einen
@@ -237,14 +238,14 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     engine.event_flag=[&](unsigned no){return events?(events->flag(1,no)?1:0):0;};
     engine.set_event_flag=[&](unsigned no){if(events)events->set_flag(1,no,0);};
     // sys->pt_flg gehoert RoomWorld (presentation_flags; Bit 0x1 = bhPutModel(plp), game.c:357).
-    engine.pt_flg_or=[&](unsigned bits){if(world)world->set_presentation_flags(world->presentation_flags()|bits);};
-    engine.pt_flg_clr=[&](unsigned bits){if(world)world->set_presentation_flags(world->presentation_flags()&~bits);};
+    engine.pt_flg_or=[&](unsigned bits){if(binding){*binding->presentation|=bits;return;}if(world)world->set_presentation_flags(world->presentation_flags()|bits);};
+    engine.pt_flg_clr=[&](unsigned bits){if(binding){*binding->presentation&=~bits;return;}if(world)world->set_presentation_flags(world->presentation_flags()&~bits);};
     // CallPlayerWeaponSeEx(pPos, SeNo, SlotNo): WpnTab[w].snd_wpno liefert das Paket mit SE-Bank 1;
     // Slotwahl 8/9/19 und Get3DSoundParameter im gemeinsamen Mixerpfad, gm_flg 0x01000000 = Syukan.
     engine.weapon_se=[&](const RECVX_CB_VEC* pos,int se,int slot){
         audio.call_player_weapon_se(unsigned(WpnTab[weapon_].snd_wpno),se,{pos->x,pos->y,pos->z},slot,events&&(events->flags[11][0]&0x01000000u));};
     // StartVibrationEx(0, WpnTab[].vib_tp) (weapon.c): the shared request queue of the room owner.
-    engine.vibration=[&](int port,int type){if(world)world->request_vibration(port,type);};
+    engine.vibration=[&](int port,int type){if(binding)return;if(world)world->request_vibration(port,type);};
     // CallPlayerFootStepSe(bhCheckFloorSound(...),1,1).
     // CallPlayerFootStepSe(bhCheckFloorSound(...),1,1) -> CallPlayerFootStepSeEx(..,&PlayerPos); x/z bestimmen nur den Bodenklang.
     engine.footstep=[&](int,float x,float z){if(!world)return;const unsigned surface=world->floor_sound({x,0,z});if(surface<=4)audio.player_footstep_se(surface,1,true,events&&(events->flags[11][0]&0x01000000u));};
@@ -283,6 +284,7 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     engine.effect=[&](const RECVX_CB_EFFECT* e)->int{
         if(!world)return -1;
         world->set_effect_counter(engine.sys.yk_ct);
+        if(binding&&e->link_player){engine.unavailable.insert("Player 2 linked weapon effect not bound");return -1;}
         if(e->ef.id==3)return world->spawn_weapon_flash(*e,1,0);
         EffectSpawn spawn;spawn.flg=e->ef.flg;spawn.id=e->ef.id;spawn.type=e->ef.type;spawn.flr_no=e->ef.flr_no;spawn.mdlver=e->ef.mdlver;
         spawn.position={e->ef.px,e->ef.py,e->ef.pz};spawn.scale={e->ef.sx,e->ef.sy,e->ef.sz};spawn.ax=e->ef.ax;spawn.ay=e->ef.ay;spawn.lkono=e->jno;
@@ -297,7 +299,7 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     engine.l2_water=[&](const RECVX_CB_LINE* l,RECVX_CB_VEC* hit)->int{
         if(!world)return 0;NJS_POINT3 pt{};if(!world->l2_water({l->px,l->py,l->pz},{l->vx,l->vy,l->vz},pt))return 0;
         *hit={pt.x,pt.y,pt.z};return 1;};
-    engine.set_motion_pose=[&](uint32_t mtn,int32_t frm,uint32_t mode,uint32_t count,int32_t rate){if(world)world->player_set_motion_pose(mtn,frm,mode,count,rate);};
+    engine.set_motion_pose=[&](uint32_t mtn,int32_t frm,uint32_t mode,uint32_t count,int32_t rate){if(binding){binding->motion(mtn,frm,mode,count,rate);return;}if(world)world->player_set_motion_pose(mtn,frm,mode,count,rate);};
     // weapon.c:369 bhCalcModel(obwp[0]) im laufenden Pass: plp->owP[lkono] (Kampfkern, letzte bhCalcModel(plp)),
     // Rxyz(ax, ay, az) aus bhObjWpn und objP[2] mit Schlitten/Trommel des Waffenobjekts.
     engine.weapon_node=[this,&engine](const RECVX_CB_WEAPON_OBJECT* w,uint32_t node,float* out)->int{
@@ -316,7 +318,7 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     view.ply_id=int(player_);view.wpnr_no=int(weapon_);
     view.px=actor.position.x;view.py=actor.position.y;view.pz=actor.position.z;view.ay=actor.yaw;
     view.mtn_no=unsigned(motion);view.frm_no=int(frame);
-    publish_pose(player,motion,frame,actor,world);
+    publish_pose(player,motion,frame,actor,world,binding);
     // bhSetPad (pad.c:162) und die Flagbänke bhCk 11/5/6 des vorhandenen Besitzers.
     // pad.c pad_tab_a..d: Steuerkreuz oben setzt Bit 0 und Bit 5 (0x21), unten Bit 1 und 6 (0x42).
     const unsigned pad=(input.aim?0x10u:0)|(input.attack?0x100u:0)|(input.vertical>0?0x21u:input.vertical<0?0x42u:0)|(input.turn>0?8u:input.turn<0?4u:0)|(input.next_target?0x80u:0);
@@ -329,43 +331,46 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     // sys->yk_ct (system.c:260 je Raumwechsel 0) gehoert ebenso dem Effektbesitzer: bhEff000 liest es,
     // bhSetYakkyou schreibt es auch aus dem Raumskript (bhYakkyouSet event.c:3113, RoomWorld::set_yakkyou).
     if(world)engine.sys.yk_ct=world->effect_counter();
-    engine.sys.gm_flg=events?&events->flags[11][0]:nullptr;
-    engine.sys.st_flg=events?&events->flags[5][0]:nullptr;
-    engine.sys.sp_flg=events?&events->flags[6][0]:nullptr;
+    unsigned actor_game_flags=events?events->flags[11][0]:0u,actor_pass_flags=1u;
+    engine.sys.gm_flg=binding?&actor_game_flags:events?&events->flags[11][0]:nullptr;
+    engine.sys.st_flg=binding?binding->system:events?&events->flags[5][0]:nullptr;
+    engine.sys.sp_flg=binding?&actor_pass_flags:events?&events->flags[6][0]:nullptr;
     // cam.ncut fuer bhCheckWallAttrB89 (hitchk.c:5900): bhCmpB-Schluessel 2 des Eventbesitzers.
     engine.sys.cam_ncut=events?events->values[2]:0u;
     // sys->gm_flg 0x40000 (Magazin leer) hat im Original genau einen Platz;
     // der Inventarbesitzer setzt es in bhCountBullet, der Kampf löscht es.
-    if(events&&inventory.chamber_empty)events->flags[11][0]|=0x40000u;
+    if(!binding&&events&&inventory.chamber_empty)events->flags[11][0]|=0x40000u;
     const unsigned old_shots=engine.result.shots,old_hits=engine.result.hits,old_empty=engine.result.empty;const bool was_attacking=attacking();
     // plp->stflg hat genau einen Besitzer (Eventbank 14, dieselbe, die Aktionspfad und Gegner
     // lesen: aimend 0x400 fuer en05/en09/en17, 0x100 fuer en07). Die Kampfsicht liest und
     // schreibt sie um jeden Kernaufruf, statt eine eigene Kopie zu fuehren.
-    if(events)view.stflg=events->flags[14][0];
+    if(binding){view.flg=*binding->flags;view.flg2=*binding->flags2;view.stflg=*binding->status;}else if(events)view.stflg=events->flags[14][0];
     recvx_combat_tick(engine.core,&engine.sys,&engine.result);engine.pad=pad;accumulate_aim(engine.result);
     // player.c:6075: der Schreibauftrag ist einmalig, nicht bei jedem spaeteren Pass erneut.
     auto& weapon_object=*recvx_combat_weapon_object(engine.core);
     if(weapon_object.part2_hidden_cleared){right_part2_hidden_=false;weapon_object.part2_hidden_cleared=0;}
-    if(events)events->flags[14][0]=view.stflg;
-    if(events)inventory.chamber_empty=(events->flags[11][0]&0x40000u)!=0;
+    if(binding){*binding->flags=view.flg;*binding->flags2=view.flg2;*binding->status=view.stflg;binding->adopt(view);}else if(events)events->flags[14][0]=view.stflg;
+    if(!binding&&events)inventory.chamber_empty=(events->flags[11][0]&0x40000u)!=0;
     // cam.pe_ax/pe_pers fuer bhInitPlEyeCamera, cam.ppers und cam.ax/axp = 0 (act_scp) an die Augenkamera.
-    if(world&&engine.sys.cam_written){const unsigned w=engine.sys.cam_written;
+    if(!binding&&world&&engine.sys.cam_written){const unsigned w=engine.sys.cam_written;
         if(w&3u)world->set_eye_request(w&1u?engine.sys.cam_pe_ax:world->eye_pe_ax(),w&2u?engine.sys.cam_pe_pers:world->eye_pe_pers());
         if(w&4u)world->set_eye_ppers(engine.sys.cam_ppers);
         if(w&8u)world->clear_eye_ax();}
     engine.sys.cam_written=0;
     if(world)world->set_effect_flags(engine.sys.ef_flg);
-    if(world){world->set_player_aim_mode(engine.result.mode1,engine.result.at_flg);world->set_player_wax(engine.result.wax);}
+    if(world&&!binding){world->set_player_aim_mode(engine.result.mode1,engine.result.at_flg);world->set_player_wax(engine.result.wax);}
     if(world)world->set_effect_counter(engine.sys.yk_ct);
-    shots+=engine.result.shots-old_shots;hits+=engine.result.hits-old_hits;empty+=engine.result.empty-old_empty;
     if(!was_attacking&&attacking()){++attacks;struck_.clear();}
     if(engine.result.active){actor.yaw=view.ay;actor.position.x=view.px;actor.position.z=view.pz;motion=view.mtn_no;frame=view.frm_no;}
     vertical_=input.vertical;
     // Nach bhCalcModel: Messerabfrage (player.c:1689-1724) und bhObjWpn.
-    publish_pose(player,motion,frame,actor,world);
-    if(events)view.stflg=events->flags[14][0];
+    publish_pose(player,motion,frame,actor,world,binding);
+    if(binding){view.flg=*binding->flags;view.flg2=*binding->flags2;view.stflg=*binding->status;}else if(events)view.stflg=events->flags[14][0];
     recvx_combat_after_model(engine.core,&engine.sys,&engine.result);
-    if(events)events->flags[14][0]=view.stflg;
+    // Knife hits are produced by bhCheckKnifeAtari AFTER bhCalcModel. Include
+    // them in the same diagnostics as gun hits produced by the earlier pass.
+    shots+=engine.result.shots-old_shots;hits+=engine.result.hits-old_hits;empty+=engine.result.empty-old_empty;
+    if(binding){*binding->flags=view.flg;*binding->flags2=view.flg2;*binding->status=view.stflg;binding->adopt(view);}else if(events)events->flags[14][0]=view.stflg;
     if(world)world->set_effect_counter(engine.sys.yk_ct);
     // PlyPchMain führt die Aufschaltung in pp.lck_tbl als RECVX_ENEMY_WORK*;
     // owner_index ist der Raumindex des vorhandenen Besitzers. Ohne die noch
@@ -377,18 +382,20 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
 }
 // objP des Originals: die Pose, die das Motionsampling geschrieben hat, plus
 // die Gelenkmatrizen des letzten bhCalcModel. Beides je Pass neu.
-void CombatController::publish_pose(PlayerAsset& player,std::size_t motion,std::int64_t frame,const SceneSpawn& actor,RoomWorld* world){
+void CombatController::publish_pose(PlayerAsset& player,std::size_t motion,std::int64_t frame,const SceneSpawn& actor,RoomWorld* world,CombatActorBinding* binding){
     auto& engine=*original_;auto& view=engine.player();
     // objP des Spielerwerks (RoomWorld::player_pose_edits) mit den Kampfknoten darueber.
-    const auto overrides=world?world->player_pose_edits(pose_overrides(player,motion,frame)):pose_overrides(player,motion,frame);
+    const auto edits=pose_overrides(player,motion,frame);
+    const auto overrides=binding?edits:world?world->player_pose_edits(edits):edits;
+    if(binding)binding->model(overrides,view);
     if(!player.has_motion(motion)){view.nodes=0;return;}
-    const auto local=player.local_pose(motion,frame,overrides);
-    const auto bones=player.script_nodes(player.pose(motion,frame,actor.position,actor.yaw,overrides));
+    const auto local=binding?binding->local_pose():player.local_pose(motion,frame,overrides);
+    const auto bones=binding?binding->joints():player.script_nodes(player.pose(motion,frame,actor.position,actor.yaw,overrides));
     view.nodes=unsigned(std::min<std::size_t>(RECVX_CB_NODES,std::min(bones.size(),engine.script_to_model.size())));
     // pp->mlwP->owP ist der zuletzt von bhCalcModel(plp) berechnete Objektbaum (der
     // vorigen Runde). bhSetGunFire/bhControlEffect lesen genau ihn; die Pose des
     // laufenden Passes darf hier nicht neu gesampelt werden.
-    const std::vector<BoneMatrix>* committed=world?&world->player_committed_joints():nullptr;
+    const std::vector<BoneMatrix>* committed=binding?&bones:world?&world->player_committed_joints():nullptr;
     for(unsigned n=0;n<view.nodes;++n){
         std::copy_n(committed&&n<committed->size()?(*committed)[n].value:bones[n].value,16,view.owp_mtx[n]);
         const unsigned m=engine.script_to_model[n];if(m>=local.size())continue;

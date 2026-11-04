@@ -244,6 +244,11 @@ def compact(d, age, grid_cache=None):
     eq = equipped(d)
     if eq:
         result['equipped'] = [eq[3] or eq[1], eq[2]]
+    ai = d.get('player_ai')
+    if ai and ai.get('on'):
+        # The game's own auto-fight (companion decision for Player 1, debug menu "Player AI"):
+        # [decision, enemy index or None]; it yields to every control line and keyboard input.
+        result['player_ai'] = [ai.get('decision'), None if ai.get('target', -1) < 0 else ai.get('target')]
     heal = healing(d)
     if heal:
         result['heal'] = heal

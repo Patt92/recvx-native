@@ -212,6 +212,8 @@ private:
 };
 class GameUi {
 public:
+    // Host overlays (netplay status): plain ASCII through the message font.
+    void ascii(SoftwareRenderer& image,const std::string& text,int x,int y,float scale=1,std::uint32_t tint=0xffffffff)const;
     GameUi(const std::filesystem::path& data,const std::filesystem::path& mods={});
     void draw(SoftwareRenderer& image,const Inventory& inventory,const StatusMenu& menu,const MessageDialog& dialog,unsigned tick);
     // `row_shift` is the accumulated sub1.c ItemBoxIconSet mutation of the
@@ -220,6 +222,7 @@ public:
     // 2: 0 = table values (not scrolling), 1 = parts_09b[20] lit (Up), 2 =
     // parts_09b[21] lit (Down), 3 = both neutral (18).
     void draw_box(SoftwareRenderer& image,const Inventory& inventory,const StatusMenu& menu,unsigned base,unsigned index,bool selecting,const StatusSlide* slide=nullptr,unsigned exit_state=0,unsigned note=0,float row_shift=0.f,unsigned arrows=0,unsigned cursor_cell=0)const;
+    void draw_trade(SoftwareRenderer& image,const Inventory& primary,const Inventory& partner,bool npc,unsigned pane,std::array<unsigned,2> cells,bool selecting,unsigned source_pane,unsigned source_cell,const std::string& note)const;
     void draw_title(SoftwareRenderer& image);
     // Menue-/Schriftatlanten und Inventarmodelle neu ueber apply_texture_files laden (Debugschalter Textur-Mods).
     void reload_textures();
@@ -261,7 +264,6 @@ private:
     std::map<unsigned,Scene> item_models_;
     std::map<unsigned,std::vector<std::uint8_t>> item_packets_;
     void text(SoftwareRenderer& image,const Message& text,int x,int y,float scale=1,std::uint32_t tint=0xffffffff,bool dialogue=false,int selected_choice=-1,float yscale=1)const;
-    void ascii(SoftwareRenderer& image,const std::string& text,int x,int y,float scale=1,std::uint32_t tint=0xffffffff)const;
     void icon(SoftwareRenderer& image,unsigned item,int x,int y,int height=48,int narrow_width=68)const;
 };
 }

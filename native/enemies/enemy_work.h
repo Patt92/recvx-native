@@ -543,6 +543,9 @@ typedef struct RECVX_ENEMY_SERVICES {
        UNBEDINGT und VOR dem sp_flg-0x2-Test. Das sind Felder des
        Spielerbesitzers, nicht eines Gegnerworks — darum ein Dienst. */
     void  (*player_clear_offset)(void);
+    /* Host hook (no original mechanism): called before each work's routine so the
+       player owner can choose which bound player this work sees (Player 2 extension). */
+    void  (*pass_begin)(RECVX_ENEMY_WORK* w);
 
     /* subpl.c:143 bhEne_Event(epw) = subpl_mv01_tbl[ct2]: der gemeinsame
        Mode0[5]-Zweig fast aller Gegnertabellen (en07.c:73, en03.c:415,

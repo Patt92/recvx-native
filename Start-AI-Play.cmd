@@ -37,7 +37,7 @@ if not exist "%recvx_play%" mkdir "%recvx_play%"
 if exist "%recvx_play%\auto.json" del /q "%recvx_play%\auto.json"
 if exist "%recvx_play%\stream.log.lock" del /q "%recvx_play%\stream.log.lock"
 (echo 1 autodump 5 auto& echo 2 run auto 18)> "%recvx_play%\live.txt"
-start "RECVX Native" "%recvx_exe%" --data "%recvx_data%" --mods "%recvx_mods%" --controls "%~dp0controls.ini" --debug-config "%~dp0debug.ini" --video-config "%~dp0video.ini" --control "%recvx_play%\live.txt" --state "%recvx_play%\live_state.json" --snapshots "%recvx_play%\snap" --enemy-ai on --enemy-grab on
+start "RECVX Native" "%recvx_exe%" --data "%recvx_data%" --mods "%recvx_mods%" --controls "%~dp0controls.ini" --debug-config "%~dp0debug.ini" --video-config "%~dp0video.ini" --control "%recvx_play%\live.txt" --state "%recvx_play%\live_state.json" --snapshots "%recvx_play%\snap" --enemy-ai on --enemy-grab on --player-ai on
 set /a recvx_wait=0
 :wait_metrics
 if exist "%recvx_play%\auto.json" goto drive

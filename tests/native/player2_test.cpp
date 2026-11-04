@@ -2,6 +2,7 @@
 #include "input.h"
 #include "world.h"
 #include "room.h"
+#include "combat.h"
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -49,7 +50,7 @@ static void world_actor(const std::filesystem::path& data){
     _Make_SinTable();const auto bytes=RoomArchive(data).load("RM_0080.RDX",64*1024*1024);const auto scene=decode_scene(bytes);
     auto primary=scene.spawns.at(0);const auto original=primary;std::size_t motion=42;std::int64_t frame=0;AudioMixer audio(data);
     auto asset=std::make_shared<PlayerAsset>(PlayerAsset::load(data,11));
-    RoomWorld world(bytes,scene,primary,motion,frame,audio,data,{},"RM_0080");
+    RoomWorld world(bytes,scene,primary,motion,frame,audio,data,std::filesystem::path{},"RM_0080");
     check(!world.player2_state()&&world.player2_mode()==Player2Mode::Off,"Player 2 not off by default");
     world.enable_player2(Player2Mode::Local,asset,primary,1);
     check(world.player2_state()->own_models.at(0).calculated,"Player 2 has no initial committed tree");
@@ -75,11 +76,216 @@ static void world_actor(const std::filesystem::path& data){
     world.tick_player2({},false);check(driver_calls==12,"NPC driver called while paused");
     world.set_player2_mode(Player2Mode::Local);world.tick_player2({},true);check(driver_calls==12,"NPC driver called in local mode");
     world.set_player2_driver({});world.set_player2_mode(Player2Mode::Npc);world.tick_player2({},true);
-    check(world.player2_gaps().count("NPC driver not bound"),"missing NPC driver hidden");
+    check(!world.player2_gaps().count("NPC driver not bound")&&!world.player2_progress()->decision.empty(),"built-in NPC controller was not selected");
     // Re-entry allocates a new room-local actor and releases its previous tree.
     world.enable_player2(Player2Mode::Local,asset,primary,1);
     check(same(world.player2_state()->transform.position,start)&&world.player2_state()->frame==0,"Player 2 reinitialization retains prior room state");
     world.enable_player2(Player2Mode::Off,{},{});check(!world.player2_state(),"Player 2 release retains its work");
     std::cout<<"Player 2 native walk, independent state, committed pose, mode switch, NPC driver and re-entry PASS\n";
 }
-int main(int argc,char** argv){try{SDL_SetMainReady();routing();check(argc==2,"data path required");world_actor(argv[1]);return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+static void companion(const std::filesystem::path& data){
+    const auto bytes=RoomArchive(data).load("RM_0080.RDX",64*1024*1024);const auto scene=decode_scene(bytes);
+    auto primary=scene.spawns.at(0);std::size_t motion=42;std::int64_t frame=0;AudioMixer audio(data);
+    auto asset=std::make_shared<PlayerAsset>(PlayerAsset::load(data,11));auto progress=std::make_shared<Player2Progress>(1);
+    auto world=std::make_unique<RoomWorld>(bytes,scene,primary,motion,frame,audio,data,std::filesystem::path{},"RM_0080");
+    world->enable_player2(Player2Mode::Npc,asset,primary,1,progress);
+    primary.position.x+=30;const auto initial=world->player2_state()->transform.position;
+    const auto distance=[&]{const auto p=world->player2_state()->transform.position;return std::hypot(primary.position.x-p.x,primary.position.z-p.z);};
+    const auto before=distance();for(unsigned i=0;i<90;++i)world->tick_player2({},true);
+    check(distance()<before-5.f&&!same(initial,world->player2_state()->transform.position),"built-in follow did not close the distance");
+    check(progress->decision=="idle"||progress->decision=="follow","follow selected an unrelated task");
+    check(world->damage_player2(10)&&world->player2_state()->hp==150,"nonlethal NPC damage is not accounted");
+    check(world->damage_player2(2147483647)&&world->player2_state()->hp==1&&progress->life==Player2Life::Collapsing,"NPC lethal damage was not clamped to 1 HP");
+    unsigned callbacks=0;world->set_player2_driver([&](const RoomWorld&){++callbacks;return Player2Command{1,1,true,true,true};});
+    const auto anchor=world->player2_state()->transform.position;
+    for(unsigned i=0;i<120&&progress->life!=Player2Life::Downed;++i){check(!world->damage_player2(2147483647),"incapacitated NPC accepts more damage");world->tick_player2({1,1,true,true,true},true);}
+    check(progress->life==Player2Life::Downed&&!callbacks,"NPC did not finish and hold the pickup crouch");
+    check(same(anchor,world->player2_state()->transform.position)&&world->player2_state()->hp==1,"collapse moved the actor or changed its HP");
+    check(world->player2_state()->motion==45&&progress->hold_frame>0,"crouch is not a key of original pickup motion 45");
+    for(unsigned i=1;i<12;++i){const auto id=Inventory::id(progress->equipment.slots()[i]);check(!id||id==8,"NPC acquired an item outside its initial knife loadout");}
+    const auto held=world->player2_state()->own_models.at(0);const auto held_frame=world->player2_state()->frame;
+    check(!world->place_player2(primary),"debug placement mutates incapacitated NPC");
+    for(unsigned i=0;i<30;++i)world->tick_player2({1,1,true,true,true},true);
+    check(world->player2_state()->frame==held_frame&&world->player2_state()->hp==1,"downed NPC is mutable");
+    world->set_player2_mode(Player2Mode::Local);world->tick_player2({1,1,true,true,true},true);
+    check(progress->life==Player2Life::Downed&&world->player2_state()->hp==1,"mode switch revives downed NPC");
+    world.reset();
+    const auto other_bytes=RoomArchive(data).load("RM_0060.RDX",64*1024*1024);const auto other_scene=decode_scene(other_bytes);auto other=other_scene.spawns.at(0);
+    world=std::make_unique<RoomWorld>(other_bytes,other_scene,other,motion,frame,audio,data,std::filesystem::path{},"RM_0060");
+    world->enable_player2(Player2Mode::Npc,asset,other,1,progress,Player2RoomChange::Door,false);
+    check(!world->player2_present()&&world->player2_state()->hp==1,"downed NPC followed through the room transition");
+    world->tick_player2({},true);check(progress->life==Player2Life::Downed,"absent NPC ticked in another room");world.reset();
+    world=std::make_unique<RoomWorld>(bytes,scene,primary,motion,frame,audio,data,std::filesystem::path{},"RM_0080");world->enable_player2(Player2Mode::Npc,asset,primary,1,progress,Player2RoomChange::Door,false);
+    check(world->player2_present()&&same(anchor,world->player2_state()->transform.position),"return to room lost downed NPC location");
+    const auto& restored=world->player2_state()->own_models.at(0);
+    for(unsigned n=0;n<held.owp_mtx.size();++n)for(unsigned j=0;j<16;++j)check(held.owp_mtx[n].value[j]==restored.owp_mtx[n].value[j],"room return changed the immutable pose");
+    world.reset();world=std::make_unique<RoomWorld>(other_bytes,other_scene,other,motion,frame,audio,data,std::filesystem::path{},"RM_0060");
+    world->enable_player2(Player2Mode::Npc,asset,other,1,progress,Player2RoomChange::Event,false);
+    check(world->player2_present()&&same(other.position,world->player2_state()->transform.position)&&progress->equipment.hp==1&&progress->life==Player2Life::Downed,"event transport lost or revived the downed NPC");
+    const auto& moved=world->player2_state()->own_models.at(0).obj;
+    for(unsigned n=0;n<held.obj.size();++n)check(same(moved[n].position,held.obj[n].position)&&moved[n].angles==held.obj[n].angles,"event transport resampled the held local pose");
+    check(world->player2_state()->frame==held_frame&&!world->place_player2(primary)&&!world->damage_player2(10),"transport released NPC immutability");
+    world.reset();world=std::make_unique<RoomWorld>(bytes,scene,primary,motion,frame,audio,data,std::filesystem::path{},"RM_0080");
+    world->enable_player2(Player2Mode::Local,asset,primary,1);
+    auto blast=world->player2_state()->transform.position;blast.y+=8;
+    world->explode(blast,{0,0,1});
+    for(unsigned i=0;i<60&&world->player2_state()->hp==160;++i)world->tick();
+    check(world->player2_state()->hp<160,"production explosion does not reach secondary actor damage");
+    world->enable_player2(Player2Mode::Local,asset,primary,1);
+    check(world->damage_player2(2147483647)&&world->player2_state()->hp==0,"human Player 2 incorrectly receives NPC immortality");
+    for(unsigned i=0;i<120;++i)world->tick_player2({},true);
+    check(world->player2_progress()->life==Player2Life::Dead&&world->player2_state()->dead,"human Player 2 cannot die");
+    world->set_player2_mode(Player2Mode::Npc);check(world->player2_state()->hp==0&&world->player2_progress()->life==Player2Life::Dead,"NPC switch resurrects a dead local player");
+    std::cout<<"NPC follow, 1-HP immutable crouch, no pickups, room persistence and mortal local Player 2 PASS\n";
+}
+static void npc_combat(const std::filesystem::path& data){
+    // Diagnostic secondary-actor placement near an ORIGINAL room enemy. No
+    // enemy injection or substitute damage path; the event/native enemy pass
+    // initializes the room's actual works and consumes native knife hits.
+    const auto bytes=RoomArchive(data).load("RM_0080.RDX",64*1024*1024);const auto scene=decode_scene(bytes);
+    auto primary=scene.spawns.at(0);std::size_t motion=42;std::int64_t frame=0;AudioMixer audio(data);
+    auto body=PlayerAsset::load(data);auto secondary=std::make_shared<PlayerAsset>(PlayerAsset::load(data,11));
+    Inventory inventory;MessageDialog dialog;std::uint32_t head=0;
+    RoomWorld world(bytes,scene,primary,motion,frame,audio,data,{},"RM_0080");EventVm events(bytes,inventory,dialog);
+    world.set_player_asset(&body);world.bind_player_collision(events);world.bind_enemy_player(inventory.hp,head);
+    world.set_enemy_ai(true);world.set_enemy_grab(false);world.set_enemy_attacks(false);
+    world.commit_player_joints(body.script_nodes(body.pose(motion,frame,primary.position,primary.yaw)));
+    events.binding=[&](const EventCommand& c){return world.bind(c);};events.initialize();world.set_simulation_flags(events.flags[6][0]);world.tick();
+    const auto targets=world.combat_targets();SceneSpawn spawn;bool placed=false;
+    for(const auto& target:targets){if(target.identity!=1||!(world.enemy_table().slot[target.index]->flg&0x20u))continue;
+        for(const auto offset:std::array<NJS_POINT3,4>{{{0,0,6},{0,0,-6},{6,0,0},{-6,0,0}}}){
+            const NJS_POINT3 p{target.position.x+offset.x,target.position.y,target.position.z+offset.z};
+            if(world.c2_wall_n({{p.x,p.y+8,p.z},{p.x,p.y+8,p.z},3.5f},0))continue;
+            spawn.position=p;spawn.yaw=int(std::atan2(p.x-target.position.x,p.z-target.position.z)*10430.381f);placed=true;break;
+        }if(placed)break;
+    }
+    check(placed,"no original target with a free NPC diagnostic position");
+    {   // Shared decision without a leader (AI play for Player 1): it only engages; the caller's reach/fire knobs
+        // select the melee stop or a ranged engagement distance and gate the attack press.
+        NpcAiActor self{spawn,world.floor_at(spawn.position),0u,{},{}};
+        const auto melee=world.npc_ai(self);
+        check(melee.target!=~0u&&(melee.action=="attack"||melee.action=="approach-enemy")&&melee.active(),("leaderless decision did not engage the room enemy: "+melee.action).c_str());
+        self.reach=20.f;self.fire=false;const auto aim=world.npc_ai(self);
+        check(aim.action=="aim"&&aim.controls.aim&&!aim.controls.attack&&!aim.controls.move&&!aim.controls.next_target,("ranged decision without a lock pressed attack, moved or re-searched outside the ready stance: "+aim.action).c_str());
+        self.combat_mode=65u;const auto research=world.npc_ai(self);
+        check(research.action=="aim"&&research.controls.aim&&!research.controls.attack&&research.controls.next_target,"ranged ready stance without a lock did not press the original re-search");
+        self.fire=true;self.combat_mode=0u;const auto ready=world.npc_ai(self);
+        check(ready.action=="attack"&&ready.controls.aim&&!ready.controls.attack&&!ready.controls.next_target,"attack pressed outside the original ready stance");
+        self.combat_mode=65u;const auto strike=world.npc_ai(self);
+        check(strike.action=="attack"&&strike.controls.attack&&!strike.controls.turn&&!strike.controls.next_target,"ranged decision with a lock in mode2 65 did not press attack");
+        self.reach=-1.f;self.fire=true;self.combat_mode=65u;const auto knife=world.npc_ai(self);
+        check(!knife.controls.next_target,"melee decision pressed the re-search");
+        NpcAiActor far{spawn,world.floor_at(spawn.position),0u,{},{}};far.actor.position.x+=400.f;
+        const auto idle=world.npc_ai(far);check(!idle.active()&&idle.action=="idle"&&idle.target==~0u,"leaderless decision engaged without a visible enemy");
+    }
+    primary.position=spawn.position;primary.position.x+=16;
+    world.enable_player2(Player2Mode::Npc,secondary,spawn,1);
+    int initial_hp=0;for(const auto& target:targets)initial_hp+=target.hp;
+    unsigned t=0;for(;t<240&&world.player2_progress()->hits==0;++t){
+        world.tick_enemy_pass();const auto before=primary;const auto before_motion=motion;const auto before_frame=frame;const auto before_status=events.flags[14][0];const int hp=inventory.hp;
+        world.tick_player2({},true);
+        check(same(before.position,primary.position)&&before.yaw==primary.yaw&&motion==before_motion&&frame==before_frame&&events.flags[14][0]==before_status&&inventory.hp==hp,"secondary combat wrote Player 1 state");
+        world.tick_after_player();
+    }
+    const auto* progress=world.player2_progress();
+    if(!progress->hits){for(const auto& gap:world.player2_gaps())std::cerr<<"P2 gap: "<<gap<<'\n';std::cerr<<"AI: "<<progress->decision<<", attacks "<<progress->attacks<<", motion "<<world.player2_state()->motion<<'\n';}
+    check(progress->attacks>0&&progress->hits>0,"autonomous NPC did not hit a real room enemy through native knife combat");
+    world.tick_enemy_pass();int hp=0;for(const auto& target:world.combat_targets())hp+=target.hp;
+    check(hp<initial_hp,"native NPC knife hit did not affect original enemy HP");
+    std::cout<<"NPC native knife hit on original RM_0080 enemy after "<<t<<" ticks, Player 1 isolation PASS\n";
+}
+static void enemy_binding(const std::filesystem::path& data){
+    // Host binding of the enemy mechanisms to Player 2 in RM_0031, whose free zombies (type 0, mode0 1) bite the
+    // player at the spawn (verify_enemy_ai.py "rm0031-natural"). Player 2 stands beside zombie 5 at a diagnostic
+    // position, Player 1 keeps the spawn: the nearer actor must be chosen, driven (plp mode0 4/5/6) and lose HP
+    // through the ordinary player_set/player_damage path; Player 1 stays untouched.
+    const auto bytes=RoomArchive(data).load("RM_0031.RDX",64*1024*1024);const auto scene=decode_scene(bytes);
+    auto primary=scene.spawns.at(0);std::size_t motion=42;std::int64_t frame=0;AudioMixer audio(data);
+    auto body=PlayerAsset::load(data);auto secondary=std::make_shared<PlayerAsset>(PlayerAsset::load(data,11));
+    Inventory inventory;MessageDialog dialog;std::uint32_t head=0;inventory.hp=160;
+    RoomWorld world(bytes,scene,primary,motion,frame,audio,data,{},"RM_0031");EventVm events(bytes,inventory,dialog);
+    world.set_player_asset(&body);world.bind_player_collision(events);world.bind_enemy_player(inventory.hp,head);
+    world.set_enemy_ai(true);world.set_enemy_grab(true);world.set_enemy_attacks(true);
+    world.commit_player_joints(body.script_nodes(body.pose(motion,frame,primary.position,primary.yaw)));
+    events.binding=[&](const EventCommand& c){return world.bind(c);};events.initialize();world.set_simulation_flags(events.flags[6][0]);world.tick();
+    const SceneSpawn spawn{{28.f,0.f,75.f},0};
+    world.enable_player2(Player2Mode::Local,secondary,spawn,1);
+    const int p1_hp=inventory.hp;bool driven=false,targeted=false;unsigned t=0;
+    for(;t<1500&&(world.player2_state()->hp>=160||!driven);++t){
+        world.tick_enemy_pass();
+        if(world.player2_targeted())targeted=true;if(world.player2_driven())driven=true;
+        world.tick_player2({},true);world.tick_after_player();
+        world.commit_player_joints(body.script_nodes(body.pose(motion,frame,primary.position,primary.yaw)));
+        if(std::getenv("RECVX_P2_TRACE")&&t%60==0){for(unsigned i=4;i<6;++i){const auto* e=world.enemy_table().slot[i];if(!e)continue;std::fprintf(stderr,"t=%u zombie %u mode=%u/%u/%u/%u type=%u pos=%.1f,%.1f hp=%d | p2 pos=%.1f,%.1f hp=%d targeted=%u driven=%d\n",t,i,e->mode0,e->mode1,e->mode2,e->mode3,e->type,e->px,e->pz,e->hp,world.player2_state()->transform.position.x,world.player2_state()->transform.position.z,world.player2_state()->hp,world.player2_targeted(),int(world.player2_driven()));}}
+    }
+    if(!driven||world.player2_state()->hp>=160){for(const auto& gap:world.player2_gaps())std::cerr<<"P2 gap: "<<gap<<'\n';for(const auto& gap:world.unbound_enemy_routines())std::cerr<<"enemy gap: "<<gap<<'\n';std::cerr<<"targeted "<<targeted<<" driven "<<driven<<" hp "<<world.player2_state()->hp<<" after "<<t<<" ticks\n";}
+    check(targeted,"no enemy chose Player 2 as its target");
+    check(driven&&world.player2_progress()->grabs>=1,"the zombie never drove Player 2 (grab/bite)");
+    check(world.player2_state()->hp<160,"Player 2 lost no HP through the enemy path");
+    check(inventory.hp==p1_hp&&!world.player_grabbed(),"Player 1 was bitten instead of Player 2");
+    for(unsigned k=0;k<900&&world.player2_driven();++k){world.tick_enemy_pass();world.tick_player2({},true);world.tick_after_player();}
+    check(!world.player2_driven(),"the zombie never released Player 2");
+    check(world.player2_state()->motion==42&&world.player2_progress()->life==Player2Life::Active,"release did not return Player 2 to its idle pose");
+    std::cout<<"Enemy targeting of Player 2: RM_0031 zombie grab after "<<t<<" ticks, HP loss through player_set, release to idle, Player 1 untouched PASS\n";
+}
+static void room_policy(){
+    Player2Progress p;const SceneSpawn start{{1,2,3},1234},entry{{20,4,30},5678};
+    p.enter_room(Player2Mode::Npc,{0,8,0},start,Player2RoomChange::Reload,true);
+    const auto stock=p.equipment.items;
+    p.enter_room(Player2Mode::Npc,{0,5,0},entry,Player2RoomChange::Door,false);
+    check(p.room_name()=="RM_0080.RDX"&&p.room_distance()==1&&same(p.location.position,start.position)&&!p.teleports,"far NPC did not stay exactly one room behind");
+    p.enter_room(Player2Mode::Npc,{0,8,0},entry,Player2RoomChange::Door,false);
+    check(p.room_distance()==0&&same(p.location.position,start.position)&&!p.teleports,"backtracking teleported a resident NPC");
+    p.enter_room(Player2Mode::Npc,{0,5,0},entry,Player2RoomChange::Door,false);
+    p.enter_room(Player2Mode::Npc,{0,6,0},entry,Player2RoomChange::Door,false);
+    check(p.room_name()=="RM_0060.RDX"&&p.room_distance()==0&&p.teleports==1&&p.travel=="room-limit-teleport","NPC fell two rooms behind");
+    p.enter_room(Player2Mode::Npc,{0,6,0},start,Player2RoomChange::Reload,true);
+    check(same(p.location.position,entry.position)&&p.teleports==1,"same-room resource reload moved the NPC");
+    p.enter_room(Player2Mode::Npc,{0,9,0},start,Player2RoomChange::Event,false);
+    check(p.room_distance()==0&&p.teleports==2&&same(p.location.position,start.position),"event transition did not teleport the NPC");
+    p.enter_room(Player2Mode::Npc,{1,0,0},entry,Player2RoomChange::Door,false);
+    check(p.room_distance()==0&&p.teleports==3&&p.travel=="event-teleport","chapter transition left NPC behind");
+    p.enter_room(Player2Mode::Npc,{1,0,1},start,Player2RoomChange::Door,false);
+    check(p.room_case==1&&p.teleports==4,"room variant change reused the wrong NPC space");
+    check(p.equipment.items==stock&&p.equipment.hp==160,"room policy changed equipment or HP");
+    p.enter_room(Player2Mode::Npc,{1,1,1},entry,Player2RoomChange::Door,true);
+    check(p.room_distance()==0&&p.teleports==4&&p.travel=="door-follow","nearby NPC did not follow a regular door");
+    p.life=Player2Life::Dead;p.equipment.hp=0;
+    p.enter_room(Player2Mode::Npc,{2,0,0},start,Player2RoomChange::Event,true);
+    check(p.room_name()=="RM_1011.RDX"&&p.equipment.hp==0&&p.life==Player2Life::Dead,"room tether resurrected or transported a mortal corpse");
+    std::cout<<"NPC one-room bound, backtracking, resource reload, event/chapter/variant transport, nearby escort and mortal corpse exclusion PASS\n";
+}
+static void independent_room(const std::filesystem::path& data){
+    const auto bytes=RoomArchive(data).load("RM_0080.RDX",64*1024*1024);const auto scene=decode_scene(bytes);
+    auto primary=scene.spawns.at(0);const auto leader=primary;std::size_t motion=42;std::int64_t frame=0;AudioMixer audio(data);
+    Inventory inventory;MessageDialog dialog;EventVm events(bytes,inventory,dialog);
+    auto asset=std::make_shared<PlayerAsset>(PlayerAsset::load(data,11));auto progress=std::make_shared<Player2Progress>(1);
+    RoomWorld world(bytes,scene,primary,motion,frame,audio,data,{},"RM_0080");world.bind_player_collision(events);
+    events.binding=[&](const EventCommand& c){return world.bind(c);};events.initialize();
+    world.enable_player2(Player2Mode::Npc,asset,primary,1,progress);
+    unsigned calls=0,primary_doors=0;SceneSpawn target_entry;
+    events.door=[&](const DoorRequest&){++primary_doors;return true;};
+    world.player2_room_entry=[&](const DoorRequest& request)->std::optional<SceneSpawn>{
+        ++calls;check(request.room_name()=="RM_0050.RDX"&&request.spawn==1,"NPC did not consume the actual door destination");
+        target_entry=decode_scene(RoomArchive(data).load(request.room_name(),64*1024*1024)).spawns.at(request.spawn);return target_entry;};
+    check(!world.order_player2_door(2),"NPC door order accepted an item/key trigger");
+    const auto flags=events.interactions[0].flags;events.interactions[0].flags&=~1u;
+    check(!world.order_player2_door(0),"NPC used a disabled door");events.interactions[0].flags=flags;
+    auto approach=primary;approach.position.x=-26.f;approach.yaw=16384;world.place_player2(approach);
+    const auto story=events.flags;const auto items=inventory.items;
+    check(world.order_player2_door(0),"enabled original door order refused");
+    unsigned ticks=0;for(;ticks<240&&world.player2_present();++ticks)world.tick_player2({},true);
+    if(world.player2_present())std::cerr<<"NPC door: "<<progress->decision<<" at "<<world.player2_state()->transform.position.x<<","<<world.player2_state()->transform.position.z<<'\n';
+    check(!world.player2_present()&&calls==1&&progress->room_name()=="RM_0050.RDX"&&progress->room_distance()==1,"NPC did not walk to and leave through its own room door");
+    check(same(progress->location.position,target_entry.position)&&progress->travel=="independent-door"&&!progress->teleports,"NPC used an invented neighbor spawn");
+    check(!primary_doors&&events.flags==story&&inventory.items==items&&same(primary.position,leader.position)&&primary.yaw==leader.yaw,"NPC door advanced Player 1 or story state");
+    const auto held_frame=progress->frame;
+    for(unsigned i=0;i<30;++i)world.tick_player2({1,1,true,true,true},true);
+    check(progress->frame==held_frame&&!world.damage_player2(10)&&!world.place_player2(primary)&&!world.order_player2_door(1)&&!world.player2_trade_ready(),"absent NPC mutated in the active room");
+    const auto other_bytes=RoomArchive(data).load("RM_0050.RDX",64*1024*1024);const auto other_scene=decode_scene(other_bytes);auto other=other_scene.spawns.at(1);
+    RoomWorld joined(other_bytes,other_scene,other,motion,frame,audio,data,{},"RM_0050");
+    joined.enable_player2(Player2Mode::Npc,asset,other,1,progress,Player2RoomChange::Door,false);
+    check(joined.player2_present()&&same(joined.player2_state()->transform.position,target_entry.position)&&!progress->teleports,"Player 1 entering the NPC room did not rejoin the resident");
+    std::cout<<"NPC independent original door after "<<ticks<<" ticks: no story/primary writes, dormant neighbor, real POS entry and rejoin PASS\n";
+}
+int main(int argc,char** argv){try{SDL_SetMainReady();routing();check(argc==2,"data path required");room_policy();world_actor(argv[1]);companion(argv[1]);npc_combat(argv[1]);enemy_binding(argv[1]);independent_room(argv[1]);return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

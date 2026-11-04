@@ -49,6 +49,11 @@ struct SnapshotHost {
     // sdfunc.c:749). Das Original haelt sie nicht im SAVEFILE (Retry/Load laden Fall 0); der
     // Snapshot ist ein Hoststand und stellt das Paket wieder her, das beim Sichern geladen war.
     unsigned room_sound_case=0;
+    // Format 3: the optional host two-player session (PLAYER2.md). Older files read as single player.
+    bool two_players=false;
+    unsigned player2_mode=0,player2_model=11;   // Player2Mode (1 local, 2 NPC), SYSTEM asset 10..14
+    int player2_hp=160;bool player2_poisoned=false;unsigned player2_weapon=0;
+    std::array<std::uint32_t,16> player2_items{}; // the companion's inventory bank (Inventory::slots)
 };
 struct Snapshot {SaveFile save;SnapshotHost host;};
 struct SnapshotPlayer {NJS_POINT3 position{};Angle yaw=0;int floor=0;unsigned spawn=0;std::size_t camera=0;};

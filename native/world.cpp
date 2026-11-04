@@ -134,6 +134,7 @@ static std::vector<std::uint8_t> skinned_object_packet(const std::vector<std::ui
 }
 WorldEntity& RoomWorld::entity(unsigned kind,unsigned index){if(kind>4||index>4096)throw std::runtime_error("invalid world entity kind "+std::to_string(kind)+" index "+std::to_string(index));return entities_[{kind,index}];}
 RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,SceneSpawn& player,std::size_t& motion,std::int64_t& frame,AudioMixer& audio,const std::filesystem::path& data,const std::filesystem::path& mods,const std::string& room_name,unsigned game_mode):room_(b),header_(inspect_room(b).room_offset),player_(player),motion_(motion),frame_(frame),audio_(audio){
+    player2_data_=data;player2_mods_=mods;
     {const auto id=RoomIdentity::parse(room_name);stage_no_=id.stage;room_no_=id.room;room_case_=id.variant;}
     // The room read (bhMainSequence mn_mode 4, system.c:1601-1895) loads rom->bak_col but calls no njSetBackColor: until the first
     // EOR expiry the frame keeps the clear the previous task installed (door, movie, title, game over).
@@ -2290,6 +2291,7 @@ void RoomWorld::bomb_damage(const BombRequest& bomb){
             }
         }
     }
+    if(enemy_attacks_)player2_bomb_damage(bomb);
     bomb_enemy_damage(bomb); // weapon.c:1420: the real ene work table, not the retired EN01 facade
 
 }
@@ -6030,6 +6032,11 @@ void RoomWorld::bind_player_collision(EventVm& events){
     /* system.c:742: plp->mode3 = 0 when cb_flg 4 falls. mode0..mode3 share one
        little-endian word, so only the top byte of the player mode is cleared. */
     events.release_cinematic_player=[this]{collision_mode_&=0x00ffffffu;};
+}
+MotionActor RoomWorld::target_motion_actor(){
+    if(enemy_target_==1u&&player2_){auto& p=*player2_;auto& w=p.work;
+        return {w.object_flags,p.status,p.flags2,p.control,p.system,p.collision_mode,p.floor,p.push_count,p.push_index,p.floor_sound,p.foot_effect,p.step,int(w.transform.yaw),true,{}};}
+    return motion_actor();
 }
 MotionActor RoomWorld::motion_actor(){
     auto& flags=collision_events_?collision_events_->flags[13][0]:collision_flags_;

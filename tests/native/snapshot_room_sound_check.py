@@ -50,16 +50,21 @@ def main():
         run('save', 30, ['5 debug_key F2', '6 debug_select snapshot_save 0', '7 confirm'], slots)
         path = slots / 'snapshot-1.rcvxsnap'
         raw = bytearray(path.read_bytes())
-        assert raw[:8] == b'RCVXSNAP' and struct.unpack_from('<I', raw, 8)[0] == 2, 'runtime did not write a format 2 snapshot'
+        fmt = struct.unpack_from('<I', raw, 8)[0]
+        assert raw[:8] == b'RCVXSNAP' and fmt in (2, 3), 'runtime did not write a format 2/3 snapshot'
         body = raw[:-4]
         assert zlib.crc32(bytes(body)) == struct.unpack_from('<I', raw, len(raw) - 4)[0], 'snapshot CRC differs from zlib crc32'
-        assert body[-1] == 0, 'direct start must record room sound case 0'
+        # Format 3 appends the two-player byte (0 here) after the room sound case.
+        sound_at = -1 if fmt == 2 else -2
+        if fmt == 3:
+            assert body[-1] == 0, 'single-player run wrote a two-player block'
+        assert body[sound_at] == 0, 'direct start must record room sound case 0'
 
         direct = run('direct', 600, ['0 debug_key F2', '1 debug_select snapshot_load 0', '2 confirm'], slots)
         missing = [m for m in direct['audio_unavailable'] if 'SE bank 3' in m]
         assert missing, 'counter-check: case 0 must still lack the zombie bank (pack 2010)'
 
-        body[-1] = 1
+        body[sound_at] = 1
         patched = body + struct.pack('<I', zlib.crc32(bytes(body)))
         variant = root / 'variant'
         variant.mkdir()

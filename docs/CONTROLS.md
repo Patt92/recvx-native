@@ -19,6 +19,8 @@ close button or the configured quit key.
 | Aim | Hold R | Hold RB |
 | Attack while aiming | Enter or Left Ctrl | A |
 | Inventory | Tab | Y |
+| Trade with nearby Player 2/NPC | Shift+Tab | L1/LB + Triangle/Y |
+| Partner equip/reload/medicine actions (partner pane in exchange window) | R (Aim), then Enter | R1/RB (Aim), then A |
 | Confirm/interact | Enter | A |
 | Cancel menu/dialogue | Escape | B |
 | Pause | P, Escape | Back/Select; press again or Start/Options to resume |
@@ -55,6 +57,16 @@ camera-relative 360-degree movement. Gameplay movement speed still uses the
 original animation curves. Menu/cinematic/dialogue restrictions apply equally
 to keyboard and controller. Confirm, inventory and skip trigger once per press;
 holding a direction repeats menu navigation after a configurable delay.
+
+The optional [Player-2 trade window](PLAYER2.md#item-exchange) takes priority
+over ordinary Inventory when its chord is pressed. Hold the modifier before
+Inventory. Both buttons must belong to the same controller. The configurable
+`trade` action defaults to `Left Shift + Tab, Right Shift + Tab` under
+`[keyboard]` and `button:leftshoulder + button:y` under `[gamepad]`.
+Older INIs without `trade` receive these defaults; `trade = none` disables a
+device's binding. Chord syntax uses a spaced ` + ` between two keys or two
+controller buttons. Edit the INI for chords; OPTION captures a single key,
+button or axis when rebinding.
 
 In item examination, Left/Right rotates horizontally and Up/Down vertically;
 Confirm inspects the facing surface. Confirm advances original text pages and

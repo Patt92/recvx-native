@@ -162,6 +162,7 @@ uint32_t recvx_enemy_control(RECVX_ENEMY_TABLE* t, const RECVX_ENEMY_DISPATCH* d
         w->sv = sv ? sv : w->sv;
 
         if (!recvx_enemy_pass_enabled(w)) continue;
+        if (sv && sv->pass_begin) sv->pass_begin(w);
 
         /* eneset.c:364-370 — Vorzustand des Passes. */
         w->pxb = w->px; w->pyb = w->py; w->pzb = w->pz;

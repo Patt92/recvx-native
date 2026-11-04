@@ -44,13 +44,28 @@ int main(){try{
     const auto loaded=read_snapshot(path);check(loaded.save.encode()==snap.save.encode()&&loaded.host.room=="RM_1020.RDX"&&loaded.host.body==11&&loaded.host.room_sound_case==1,"file roundtrip");
     // Format 1 (ohne room_sound_case) bleibt lesbar: Formatwort 1, Feld fehlt, Fall 0.
     {std::vector<std::uint8_t> bytes;{std::ifstream f(path,std::ios::binary);bytes.assign((std::istreambuf_iterator<char>(f)),std::istreambuf_iterator<char>());}
-     bytes.resize(bytes.size()-4-1); // CRC und das Format-2-Byte entfernen
+     bytes.resize(bytes.size()-4-2); // CRC, das Format-2-Byte und das Format-3-Byte (two_players 0) entfernen
      bytes[8]=1;bytes[9]=bytes[10]=bytes[11]=0;
      std::uint32_t crc=0xffffffffu;for(std::size_t i=0;i<bytes.size();++i){crc^=bytes[i];for(int k=0;k<8;++k)crc=(crc>>1)^(0xedb88320u&(0u-(crc&1)));}crc=~crc;
      for(unsigned i=0;i<4;++i)bytes.push_back(std::uint8_t(crc>>(8*i)));
      const auto legacy=path.parent_path()/"recvx-snapshot-test-v1.rcvxsnap";{std::ofstream f(legacy,std::ios::binary);f.write(reinterpret_cast<const char*>(bytes.data()),std::streamsize(bytes.size()));}
      const auto old=read_snapshot(legacy);check(old.host.room=="RM_1020.RDX"&&old.host.room_sound_case==0&&old.save.encode()==snap.save.encode(),"format 1 snapshot not readable");
      std::filesystem::remove(legacy);}
+    // Format 2 (ohne Zweispielerblock) bleibt lesbar: Einzelspieler.
+    {std::vector<std::uint8_t> bytes;{std::ifstream f(path,std::ios::binary);bytes.assign((std::istreambuf_iterator<char>(f)),std::istreambuf_iterator<char>());}
+     bytes.resize(bytes.size()-4-1);bytes[8]=2;bytes[9]=bytes[10]=bytes[11]=0;
+     std::uint32_t crc=0xffffffffu;for(std::size_t i=0;i<bytes.size();++i){crc^=bytes[i];for(int k=0;k<8;++k)crc=(crc>>1)^(0xedb88320u&(0u-(crc&1)));}crc=~crc;
+     for(unsigned i=0;i<4;++i)bytes.push_back(std::uint8_t(crc>>(8*i)));
+     const auto legacy=path.parent_path()/"recvx-snapshot-test-v2.rcvxsnap";{std::ofstream f(legacy,std::ios::binary);f.write(reinterpret_cast<const char*>(bytes.data()),std::streamsize(bytes.size()));}
+     const auto old=read_snapshot(legacy);check(!old.host.two_players&&old.host.room_sound_case==1&&old.save.encode()==snap.save.encode(),"format 2 snapshot not readable as single player");
+     std::filesystem::remove(legacy);}
+    check(!loaded.host.two_players,"a single-player save claims two players");
+    // Format 3: the two-player block survives a roundtrip; an invalid block is refused.
+    {auto two=snap;two.host.two_players=true;two.host.player2_mode=2;two.host.player2_model=13;two.host.player2_hp=99;two.host.player2_poisoned=true;two.host.player2_weapon=4;two.host.player2_items[0]=1;two.host.player2_items[1]=Inventory::pack(9,15);
+     const auto p2=path.parent_path()/"recvx-snapshot-test-2p.rcvxsnap";write_snapshot(p2,two);const auto back=read_snapshot(p2);
+     check(back.host.two_players&&back.host.player2_mode==2&&back.host.player2_model==13&&back.host.player2_hp==99&&back.host.player2_poisoned&&back.host.player2_weapon==4&&back.host.player2_items==two.host.player2_items&&back.save.encode()==snap.save.encode(),"two-player block roundtrip");
+     two.host.player2_model=9;write_snapshot(p2,two);bool refused=false;try{read_snapshot(p2);}catch(const std::exception&){refused=true;}check(refused,"invalid two-player block accepted");
+     std::filesystem::remove(p2);}
 
     Inventory restored;MessageDialog d2;restore_inventory(loaded,restored);EventVm next(data,restored,d2);restore_events(loaded,next);
     check(restored.items==inventory.items&&restored.player==1&&restored.hp==77&&restored.poisoned&&restored.side_pack&&restored.play_time==12345,"inventory restore");

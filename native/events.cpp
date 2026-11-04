@@ -747,7 +747,8 @@ void EventVm::tick(){
     }}
 Message EventVm::room_message(unsigned index)const{return read_message(room_,messages_,index);}
 bool EventVm::request_door(const DoorRequest& request,bool script){
-    if(!door||!door(request))return false;
+    auto tagged=request;tagged.scripted=script;
+    if(!door||!door(tagged))return false;
     // bhSetDoorDemo / bhCheckExmAtari signal the request now; game.c starts
     // its fade on the following main pass, after bhControlEvent has run.
     if(script){

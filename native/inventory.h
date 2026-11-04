@@ -96,6 +96,15 @@ public:
     // ItemBoxChange korrigiert bei einem Breitenwechsel listcsr_0, nicht listcsr_2 (ELF 0x2A5C5C).
     // Ohne Menuebesitzer bleibt die optionale Cursor-Rueckgabe unbenutzt.
     bool box_change(unsigned slot,unsigned index,unsigned box,unsigned stage,unsigned room,unsigned* message=nullptr,unsigned* cursor_slot=nullptr,unsigned cursor_cell=0);
+    struct TradeResult {
+        enum Code {Transferred,Empty,NoSpace,Restricted,Invalid,Unavailable} code=Invalid;
+        unsigned message=0;
+        bool changed()const{return code==Transferred;}
+    };
+    // Optional host trading: two live inventory owners, using ItemBoxChange's
+    // existing entry exchange, ItemSort and Combi_01. Atomic on refusal.
+    TradeResult trade_with(Inventory& other,unsigned source,unsigned destination,unsigned stage,unsigned room,bool this_npc=false,bool other_npc=false);
+    static bool npc_trade_item_allowed(std::uint32_t entry);
     std::string condition()const;
     // sub1.c ItemSearch: first pip[1..11] entry with this item id (slot index),
     // 0 when absent.
@@ -151,6 +160,7 @@ public:
     unsigned switch_player(unsigned target,std::uint32_t* stflg=nullptr);
     std::int16_t retry_count=0; // sys->retry_ct (room.c:1045-1047), SAVEFILE
 private:
+    bool box_change_entry(unsigned slot,std::uint32_t& entry,unsigned stage,unsigned room,unsigned* message=nullptr,unsigned* cursor_slot=nullptr,unsigned cursor_cell=0);
     // Original ItemSort over pip[2..11]: wide items first, then the rest; the
     // equipped index pip[0] is left unchanged, exactly as in the original.
     void compact();

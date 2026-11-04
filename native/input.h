@@ -16,7 +16,7 @@ namespace recvx {
 // ss_flg 0x80000000 and ssv_md0 10). It toggles, because the original enters and
 // leaves on the same pad bit (pad_ps 0x20000 in, pad1.push 0x800 out). Escape is
 // bound to it as well: Cancel inside menus, never a quit key.
-enum class Action {Forward,Back,TurnLeft,TurnRight,Run,Inventory,Confirm,Cancel,Up,Down,Left,Right,Skip,Pause,Quit,Wireframe,Aim,Attack,NextTarget,Select,Count};
+enum class Action {Forward,Back,TurnLeft,TurnRight,Run,Inventory,Confirm,Cancel,Up,Down,Left,Right,Skip,Pause,Quit,Wireframe,Aim,Attack,NextTarget,Select,Trade,Count};
 constexpr unsigned action_count=unsigned(Action::Count);
 struct InputFrame {
     bool gamepad_input=false;
@@ -30,7 +30,7 @@ struct InputFrame {
 // ItemBox uses the two shoulders independently of the combat button: native
 // bindings Aim (R/RB) and NextTarget (Q/LB) supply pad_tab_a bits 4 and 7.
 unsigned item_box_pad(const InputFrame& frame);
-struct InputBinding {enum class Kind {Key,Button,Axis};Kind kind;int code;int direction=1;};
+struct InputBinding {enum class Kind {Key,Button,Axis};Kind kind;int code;int direction=1;int modifier=-1;};
 struct InputConfig {
     std::array<std::vector<InputBinding>,action_count> bindings;
     float deadzone=.25f,menu_threshold=.55f;

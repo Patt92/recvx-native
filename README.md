@@ -836,6 +836,15 @@ The project license is in [LICENSE](LICENSE). Dependency licenses accompany the
 packages. Resident Evil and CODE: Veronica X belong to their respective rights
 holders; this is an independent, unofficial project.
 
+## Play together over the network
+
+Two computers, one game: the host runs `recvx-runtime --data data --netplay-host 7777`
+and plays Player 1, a friend runs `recvx-runtime --data data --netplay-join <host-ip>:7777`
+and plays Player 2 on the same screen as a second character (Claire, Chris, Steve,
+Wesker: `--player2-model`). Both machines compute the same game in lockstep; only
+button states travel over the connection. Same platform, data and options on both
+sides; see [docs/NETPLAY.md](docs/NETPLAY.md) for limits.
+
 ## Let your AI play the game
 
 A language model of your choice plays the real game in the normal window while
@@ -852,6 +861,7 @@ one action per decision. The game logic is untouched.
    | `RECVX_SKIP_VIDEOS` | optional, `1` = skip FMV videos automatically (in-engine scenes still play) |
    | `RECVX_COMBAT_RADIUS` | optional, metres for combat mode (default 25): enemies in sight that close make the model fight or leave first |
    | `RECVX_REFLEXES` | optional, `0` = the model fights alone (default: the driver shakes off grabs and shoots enemies in sight within `RECVX_ENGAGE` m, 20) |
+   | Player AI | the game itself fights visible enemies near the player with the companion's decision while the model thinks (`--player-ai on`, the launcher default; debug menu row **Player AI** turns it off). Your commands and the keyboard take precedence. |
    | `RECVX_LLM_CONTEXT_TOKENS` | optional request size cap in tokens (e.g. `15000`), oldest decisions dropped first; 0 = off |
    | `RECVX_LLM_EXTRA_BODY` | optional JSON added to every request; for models that think before answering: llama.cpp/vLLM `{"chat_template_kwargs":{"enable_thinking":false}}`, Ollama `/v1` `{"reasoning_effort":"none"}` |
 

@@ -21,6 +21,7 @@ struct SaveSlotInfo {
     int game_mode=0;         // SAVEFILE.gm_mode; originale Dateinamenfarbe
     unsigned save_room=0;    // RoomNameSwitch(stg_no * 100 + rom_no), nicht Host-Raumtext
     bool damaged=false;     // vorhandene, nicht lesbare Datei ist kein freier Slot
+    bool two_players=false; // Format 3: Host-Zweispielersitzung gespeichert
 };
 std::filesystem::path save_slot_path(const std::filesystem::path& saves_dir,unsigned slot);
 std::vector<SaveSlotInfo> list_save_slots(const std::filesystem::path& saves_dir);

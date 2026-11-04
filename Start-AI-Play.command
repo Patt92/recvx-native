@@ -39,6 +39,8 @@ $recvx_root/video.ini
 --enemy-ai
 on
 --enemy-grab
+on
+--player-ai
 on"
 if [ -n "$recvx_start" ]; then
     (IFS='
