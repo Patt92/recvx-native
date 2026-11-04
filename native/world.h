@@ -22,6 +22,7 @@
 #include "object_itmbox.h"
 #include "player_head.h"
 #include "player_action.h"
+#include "player2.h"
 #include "view_clip.h"
 #include <deque>
 #include <set>
@@ -514,6 +515,16 @@ public:
     // Testeinstieg: eine Gegnerroutine im Dienstkontext dieses Raums ausfuehren (EnemyWorldScope).
     void run_in_enemy_scope(void (*fn)(RECVX_ENEMY_WORK*),RECVX_ENEMY_WORK* w);
     void tick_after_player();
+    // Optional Player 2 belongs to this RoomWorld and uses WorldEntity's
+    // existing object-tree owner. No original enemy/player slot is replaced.
+    void enable_player2(Player2Mode mode,std::shared_ptr<const PlayerAsset> asset,SceneSpawn spawn,unsigned character=0);
+    void set_player2_mode(Player2Mode mode);
+    Player2Mode player2_mode()const{return player2_?player2_->mode:Player2Mode::Off;}
+    const WorldEntity* player2_state()const{return player2_?&player2_->work:nullptr;}
+    const std::set<std::string>& player2_gaps()const{return player2_gaps_;}
+    using Player2Driver=std::function<Player2Command(const RoomWorld&)>;
+    void set_player2_driver(Player2Driver driver){player2_driver_=std::move(driver);}
+    void tick_player2(Player2Command local,bool free_control);
     void control_lights(); // light.c:332 bhControlLight (game.c:59; auch bhInitCamSet event.c:4745)
     unsigned take_enemy_room_flags(){const auto flags=enemy_spawn_.room_flags;enemy_spawn_.room_flags=0;return flags;}
     Scene sample_player(const PlayerAsset& player,std::vector<BoneMatrix>* nodes=nullptr,const ModelNodeOverrides& combat={})const;
@@ -536,6 +547,11 @@ public:
     void check_player_mirror_floor(int flr_no);
     bool player_mirror_off()const{return player_mirror_off_;} // plp->mdflg 0x40
     bool player_model_hidden()const{return player_model_hidden_;} // plp->mdflg 0x1 (bhSetDispObj, event.c:2283)
+    // plp->mlwP->texP = plp->txp[k] (dread.c:64 je MDL des Spielers): bhSetPlayer setzt 0 (player.c:903),
+    // die Blinkfolge PlyEyeTab 0/1/2 (player.c:6988/7001), EN05 2 beim Tod (en05.c:1979/2115), EN12 0
+    // (en12.c NG00). Der Zeichenpass nimmt die Texturliste von mdl[k] fuer den Spielerkoerper.
+    unsigned player_texture_set()const{return player_texture_set_;}
+    void set_player_texture_set(unsigned k){player_texture_set_=k;}
     // cut.c:22 bhCheckCut: gm_flg &= ~0x20 je Hauptschleife, nach der exm-Festkamera (game.c:274-291)
     // und vor bhControlEvent; danach setzen Schnitt-/Ereigniskameras das Bit fuer dieses Bild.
     void begin_cut_check(){if(collision_events_)collision_events_->flags[11][0]&=~0x20u;}
@@ -895,6 +911,7 @@ private:
     // cam selbst: bhInitCamera (camera.c:9 cam.flg = 0) beim Raumaufbau, bhSetCut loescht 0x46.
     struct MonitorCamera{bool active=false;unsigned cut=0;NJS_POINT3 position{};std::int32_t ax=0,ay=0,az=0,pers=8192;float ln=0;} monitor_;
     // plp->ct1/ayp (en12.c:1710-1742 Drehung im Griff) und npSetAllMatColor(plp) (en12.c:1192).
+    unsigned player_texture_set_=0;
     std::optional<std::uint32_t> player_material_; // plp ct1/ayp liegen in player_ct1_/player_ayp_ (oben)
     unsigned pad_on_=0,pad_ps_=0;
     RECVX_PLAYER_ACTION* player_action_work_=nullptr;const Inventory* player_inventory_=nullptr;unsigned player_stand_count_=0;
@@ -921,6 +938,23 @@ private:
     SceneSpawn& player_;std::size_t& motion_;std::int64_t& frame_;AudioMixer& audio_;
     std::array<Context,16> contexts_{};
     std::map<std::pair<unsigned,unsigned>,WorldEntity> entities_;
+    struct Player2 {
+        WorldEntity work;
+        std::shared_ptr<const PlayerAsset> asset;
+        Player2Mode mode=Player2Mode::Off;
+        RECVX_PLAYER_ACTION action{};
+        unsigned character=0,pad=0,pad_old=0,flags2=0,status=0,head_flags=0;
+        unsigned control=0,system=0,collision_mode=1,floor_sound=0,foot_effect=0,frm_mode=0,mtn_attr=0;
+        int floor=0,push_count=0,push_index=-1,floor_index=-1;
+        std::optional<std::size_t> step;
+        NJS_POINT3 safe{},previous_probe{};
+        float front_offset=0;
+    };
+    std::optional<Player2> player2_;
+    Player2Driver player2_driver_;
+    std::set<std::string> player2_gaps_;
+    void commit_player2_pose(int add);
+    void append_player2(Scene& scene)const;
     mutable std::set<std::string> unbound_enemy_; // const owP/pose services report their gaps too
     mutable std::set<std::string> render_warnings_; // Host-Diagnose fuer isolierte Darstellungsfehler
     // Plaetze, deren letzter Zeichenpass das Rueckseitentor flg 0x20000 geschlossen
@@ -1095,6 +1129,10 @@ private:
     std::vector<CollisionWall> enemy_floor_cache_,enemy_step_cache_;
     int effect_template_ay_=0; // sys->ef.ay carried between EN01 writers (RECVX_EN01_EF_KEEP_AY)
     bool enemy_work_index(const RECVX_ENEMY_WORK* w,unsigned& index)const;
+    // Link auf ein BH_PWORK ohne Raumfigur (Kinder aus enemy_children_): der ene[]-Platz. link_matrix
+    // fuehrt ihn als Art kEnemySlotLink (owP des Kindbaums, enemy_slot_joint_matrix).
+    static constexpr unsigned kEnemySlotLink=5;
+    bool enemy_work_slot(const RECVX_ENEMY_WORK* w,unsigned& slot)const;
     int effect_tb(unsigned flg,int id,int type,unsigned mdlver,NJS_POINT3 position,NJS_POINT3 scale,int ax,int ay,const RECVX_ENEMY_VEC* ofs,RECVX_ENEMY_WORK* link_w,bool link_player,int lkono);
     // bhSetEffect (effect.c:331) / bhSetEffectTb ohne die Prozedurpruefung.
     int allocate_effect(const EffectSpawn& spawn,unsigned link_kind,unsigned link_index);

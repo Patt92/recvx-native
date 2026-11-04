@@ -44,6 +44,13 @@ def main():
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='recvx-rm1090-terminal-') as folder:
         root = Path(folder)
+        # bhCheckSubTask (system.c:592-596) blendet in 5 Bildern auf Schwarz, bhSysCallMonitor mn_mode0 7
+        # (system.c:2118-2147) wartet darauf, setzt ts_flg 0x80 und gibt erst dann Task 17 frei.
+        fading, _ = run(args.runtime, args.data, root, 468)
+        assert fading['computer']['active'] and fading['computer']['monitor'] == 2 and fading['computer']['md0'] == 0, ('Terminal vor dem Fade', fading['computer'])
+        assert fading['screen_fade']['running'] and 0 < fading['screen_fade']['an'] < 255, ('kein Fade auf Schwarz vor dem Terminal', fading['screen_fade'])
+        ready, _ = run(args.runtime, args.data, root, 472)
+        assert ready['computer']['monitor'] == 0 and ready['computer']['md0'] == 1 and ready['screen_fade']['an'] == 255, ('Terminal startet nicht nach dem Fade', ready['computer'], ready['screen_fade'])
         typed, _ = run(args.runtime, args.data, root, 830)
         comp = typed['computer']
         assert comp and comp['active'] and comp['number'] == 7 and comp['words'][0] == '1972', ('Tastatur', comp)
@@ -52,6 +59,9 @@ def main():
         levels = [(t['event'], t['level']) for t in typed['event_tasks']]
         assert (5, 0) not in levels and (4, 0) not in levels, ('Ereignis 5 lief waehrend des Terminals nicht zu Ende', levels)
         assert typed['event_camera'] == -1 and not typed['cinematic'], ('Kamera vor dem Enter nicht zurueck', typed['event_camera'], typed['cinematic'])
+        # bhExitSpEvtComputer (sp_evt.c:764): bhSetScreenFade(fade_pbk, 3) zurueck vom Schwarz.
+        leaving, _ = run(args.runtime, args.data, root, 874)
+        assert not leaving['computer']['active'] and leaving['screen_fade']['running'] and leaving['screen_fade']['target'] == 0 and 0 < leaving['screen_fade']['an'] < 255, ('kein Rueckfade nach dem Terminal', leaving['screen_fade'])
         after, log = run(args.runtime, args.data, root, 900)
         assert not after['computer']['active'], 'Terminal nach Enter nicht beendet'
         assert after['dialog_open'] and after['dialog_index'] == 5, ('"Nothing happens." (Nachricht 5) fehlt', after['dialog_open'], after['dialog_index'])

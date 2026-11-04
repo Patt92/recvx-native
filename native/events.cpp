@@ -304,9 +304,12 @@ int EventVm::instruction(Task& t,std::size_t& cursor){
         if(flags[10][0]&0x800){if(!flag(7,bit)){if(!mode)interactions[interaction].flags&=~1u;disable_item(t,op,p,interactions[interaction].parameters[0]);set_flag(7,bit,0);set_flag(9,bit&0x1ff,1);}}
         else if(!flag(7,bit))set_flag(9,bit,0);flags[10][0]&=~0x800u;return 1;}
     case 0x23:{const unsigned item=v.u8(p+1),bit=v.u16(p+2)&0x1ff /* event.c:2772: (v3 & 0x1FF) >> 5 */,interaction=v.u8(p+4),mode=v.u8(p+5);advance(6);
-        // bhItmSetCk indexes rom->etcp[interaction] unchecked. Some original scripts name an entry beyond the table
-        // (the PS2 would touch unrelated room memory); the ATR flag write is skipped and reported, the item part stays.
-        if(interaction>=interactions.size()){pending_bindings.push_back(EventCommand{op,t.level,t.event,p-base_,{room_.begin()+p,room_.begin()+p+6}});if(flag(7,bit))disable_item(t,op,p,item);return 1;}
+        // ORIGINAL-FIX (QUALITY.md): bhItmSetCk (event.c:2776-2794) schreibt rom->etcp[v4].flg ohne Grenzpruefung.
+        // RM_3100 @00ae (9 von 9), RM_3140 @003e (255 von 16) und RM_7030 @0022/@0028/@002e (8/9/10 von 1) treffen
+        // damit Bit 0 fremder Raumtabellen (RM_3100: flrp[0].flg, den Schalter des ersten Bodenauslosers; RM_7030:
+        // posp-Gleitkommazahlen). Regel 2: der Schreibzugriff ausserhalb der Tabelle entfaellt, der Itemteil
+        // (itwp stflg 0x1000000) bleibt wie im Original.
+        if(interaction>=interactions.size()){if(flag(7,bit))disable_item(t,op,p,item);return 1;}
         if(flag(7,bit)){if(!mode)interactions[interaction].flags&=~1u;disable_item(t,op,p,item);}else interactions[interaction].flags|=1;return 1;}
     case 0xf:flags[10][0]&=~0x400u;advance(2);return 0;
     case 0x10:{const auto item=v.u8(p+1);advance(2);return bool(flags[10][0]&0x400)&&values[8]==item;}
@@ -610,6 +613,9 @@ void EventVm::run(Task& t,bool scenario,std::size_t entry){
 }
 void EventVm::advance_game_clock(unsigned vertical_blanks){
     if(flag(1,3))inventory_.play_time+=std::min(vertical_blanks,216000000u-std::min(inventory_.play_time,216000000u));
+    // vsync_func (ps2_NaSystem.c:104): sys->time unter tk_flg 0x80 (der Aufrufer laeuft nur im Spieltask)
+    // und gm_flg 0x80000000 (system.c:1540/1892, geloescht in gameover.c:119).
+    if(flags[11][0]&0x80000000u)inventory_.game_time+=std::min(vertical_blanks,216000000u-std::min(inventory_.game_time,216000000u));
     // bhControlVSync: the host's 30-Hz game pass accounts for its two VSyncs
     // through vertical_blanks, just like stv_tm above.  The original timers
     // are configured in even VSync units, so their subtraction cannot cross

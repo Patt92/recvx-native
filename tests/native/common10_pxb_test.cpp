@@ -43,6 +43,14 @@ int main(int argc,char** argv){try{
     check(cc10(0,4500),"Common_controll 10 (player) unbound");
     o=world.player_pass_origin();check(actor.position.x==45.f&&o.x==40.f&&o.z==50.f,"Common_controll 10 must not set plp->pxb");
 
+    // Objektwork: event.c:12053 work->flr_no = bhCheckFloorNum(py) gilt fuer jedes Werk (obwp[n].flr_no).
+    {unsigned object=0;for(unsigned i=4;i<64&&!object;++i)if(world.state(2,i))object=i;
+     check(object!=0,"RM_0080 has no object work");
+     const auto& grand=world.floor_heights();unsigned upper=0;for(unsigned i=3;i<31&&!upper;++i)if(grand[i]>0.f)upper=i;
+     const float y=upper?grand[upper]+0.5f:0.f;const int expected=upper?int(upper)-2:0;
+     check(world.bind({0x65,0,0,0,{0x65,2,std::uint8_t(object),0}}),"bhLoadWork (0x65) kind 2 unbound");
+     check(cc7(1000,unsigned(y*100.f+.5f),2000),"Common_controll 7 (object) unbound");
+     check(world.state(2,object)->object_floor==expected,"Common_controll 7 must set obwp flr_no = bhCheckFloorNum(py)");}
     std::cout<<"common10_pxb: Common_controll 7 writes px+pxb, 10 only px (RM_0080 ene[0] and player) passed\n";
     return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

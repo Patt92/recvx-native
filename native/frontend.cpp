@@ -90,7 +90,8 @@ void Frontend::title_frame(){ // adv.c:2048 Adv_BioCvTitle, one 30-Hz frame
     switch(mode_){
     case 0: // RequestAllStopSoundEx(1,0,0); SetEventVibrationMode(0); ResetAdvSystem(); CursorFlag all 1; Cursor[1..2], CursorMax[1..2] (plates 11..16 are unreachable in this build)
         reset_adv_system();
-        // sys->ssd_flg & 1 (BATTLE GAME unlocked by the system save) needs the unported save system: ExtraFlag stays 0.
+        // adv.c:2114: sys->ssd_flg & 1 (Rangliste, ranking.c RankingInit) setzt ExtraFlag. Der Systemspeicher ist portiert
+        // (system_data.h), TitleCall(6) und das Battle Game (gm_mode 3) nicht: ExtraFlag bleibt deshalb 0.
         if(extra_flag_){cursor_max_=4;mode_command_id_[0]=0;mode_command_id_[1]=1;mode_command_id_[2]=3;mode_command_id_[3]=2;cursor_=from_title_==3?2:from_title_==2?3:0;}
         else{cursor_max_=3;mode_command_id_[0]=0;mode_command_id_[1]=1;mode_command_id_[2]=2;mode_command_id_[3]=3;cursor_=from_title_==2?2:0;}
         mode_=1;break;

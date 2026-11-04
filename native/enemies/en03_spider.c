@@ -450,15 +450,18 @@ static void s_wall_check2(RECVX_ENEMY_WORK* w)
     njCalcPoint(&m, &cl, &cw);
     s->center_world = rv(cw);
 }
-void recvx_en03s_leg_mark(RECVX_ENEMY_WORK* child)
+void recvx_en03s_leg_mark(RECVX_ENEMY_WORK* child, int8_t surface)
 {
-    unsigned char* b;
-    if (!child || !child->exp0) { gap(child, "bhEne03: EXP0_BYTE(pno,12) ohne Kindexp0"); return; }
-    /* Byte 12 ist die niedrigste Stelle von EXP0_F(0xC); 13 bleibt stehen. */
-    b = (unsigned char*)child->exp0;
-    b[12] = 1;
-    b[14] = 0;
-    b[15] = 0;
+    /* en03.c:4588-4592 / :6461-6465: EXP0_BYTE(i, 12/14/15) und EXP0_INT(i, 980) adressieren ueber den
+       Kindzeiger in exp0 + 128 + 4i (macros.h:82-83, en03.c:707-729) den Kind-BH_PWORK selbst:
+       mode0 = 1, mode2 = 0, mode3 = 0 (types.h BH_PWORK 0xC/0xE/0xF) und ct0 = EXP0_C(105) (0x3D4), die
+       Flaeche, auf der der Elternwork sitzt. Disassembly bhEne03_DD03 0x19E1E0-0x19E218: lw 0x80(exp0+4i),
+       sb 0xC/0xE/0xF, lb 0x69(exp0), sw 0x3D4. bhEne03s_MV00 (en03sub.c:85) liest ct0 als Flugrichtung. */
+    if (!child) return;
+    child->mode0 = 1;
+    child->mode2 = 0;
+    child->mode3 = 0;
+    child->ct0 = surface;
 }
 
 void recvx_en03s(RECVX_ENEMY_WORK* w)

@@ -18,7 +18,7 @@ enum class FrontendCommand {None,TitleCall,NewGame,LoadGame,Quit};
 // Documented host deviations (PC port, see CLAUDE.md "Hauptmenue 2026-10-13"):
 //  * Host save slots replace memory-card availability for LOAD GAME: without
 //    saves, CheckButton Flag 0 forces Cursor 1; otherwise Cursor 0 is selectable.
-//    BATTLE GAME (ssd_flg & 1, system save) remains off.
+//    BATTLE GAME (ssd_flg & 1 from the system save) remains off: TitleCall 6 / gm_mode 3 are not ported.
 //  * ReturnCode 4 (OPTION, Adv_GameOptionScreen) opens the host settings screen
 //    (Screen::Controls: key bindings, 3rd-person mod, render quality, MetalFX
 //    upscaler / frame generation / post-processing) instead of

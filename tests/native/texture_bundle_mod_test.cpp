@@ -1,5 +1,6 @@
 #include "asset_io.h"
 #include "computer.h"
+#include "screen_fade.h"
 #include "ui.h"
 #include "room.h"
 #include "md5.h"
@@ -21,6 +22,7 @@ int main(int argc,char** argv){try{
     const auto room=read_asset_file(data/"rooms/RM_0020.RDT",64*1024*1024);EventVm events(room,event_inventory,event_dialog);
     events.com_number=3;events.flags[10][0]|=0x400000;
     ComputerTerminal computer(data,mods);check(computer.begin(events),"terminal cannot begin");
+    for(unsigned i=0;i<8&&!computer.running();++i){control_screen_fade(events.flags[10][0]);computer.monitor(events);} // mn_mode0 7 (system.c:2118-2147)
     for(unsigned i=0;i<12;++i)computer.tick(0,0,events,nullptr);
     auto terminal_image=[&]{SoftwareRenderer image(640,480);computer.draw(image,ui,events);auto pixels=image.pixels();
         // syRtcGetDate is intentionally live. Ignore ONLY the displayed clock
@@ -67,6 +69,7 @@ int main(int argc,char** argv){try{
     check(terminal_image()!=original,"decoded canonical hash does not reach terminal");
     // Reset/re-entry must retain normal script lifecycle and the same resolver.
     computer.reset();events.flags[10][0]|=0x400000;check(computer.begin(events),"terminal cannot re-enter after reset");
+    for(unsigned i=0;i<8&&!computer.running();++i){control_screen_fade(events.flags[10][0]);computer.monitor(events);}
     for(unsigned i=0;i<12;++i)computer.tick(0,0,events,nullptr);
     const auto reentry=terminal_image();set_texture_mods_enabled(false);
     check(terminal_image()!=reentry,"terminal re-entry lost mod/original distinction");

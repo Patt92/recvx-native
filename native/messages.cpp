@@ -17,7 +17,7 @@ Message item_name_message(unsigned id){if(!item_names)throw std::runtime_error("
 void MessageDialog::show(Message text,unsigned index){
     // bhSetMessage: mes_ct, mes_tim, mes_fls and mes_sel restart; st_flg 0x200 on,
     // 0x80000|0x8000|0x4000|0x1000|0x800|0x400 off.
-    text_=std::move(text);index_=index;dp_=end_=0;ct_=0;tim_=frame_tim_=0;st_=0;seln_=0;selection=0;
+    text_=std::move(text);index_=index;dp_=end_=0;ct_=0;tim_=frame_tim_=0;st_=0;seln_=0;selection=0;fls_=0;cursor_drawn_=-1;arrow_drawn_=false;
     active_=true;moved_=false;ok_=false;move_=0;visible_.clear();build_page();
 }
 void MessageDialog::build_page(){
@@ -79,13 +79,17 @@ MessageDialog::Step MessageDialog::pad(bool ok,int direction){
     return Step::None;
 }
 MessageDialog::Step MessageDialog::update(){
-    moved_=false;Step step=Step::None;
+    moved_=false;Step step=Step::None;cursor_drawn_=-1;arrow_drawn_=false;
     if(active_){
         parse();frame_tim_=tim_;
         if(tim_)--tim_;
-        else if(st_&0x8000u)step=pad(ok_,move_);
+        else if(st_&0x8000u){step=pad(ok_,move_);
+            // message.c:269-305: jede Bewegung setzt mes_fls 0; Code 28 nur bei mes_fls < 24 (OK kehrt vorher zurueck).
+            if(step!=Step::Answered){if(moved_)fls_=0;if(fls_<24)cursor_drawn_=selection;fls_=(fls_+1)&0x1Fu;}}
         else if((st_&0x4000u)&&!(st_&0x1000u)){active_=false;step=Step::Closed;} // message.c:310
-        else if(!(st_&0x4000u)&&(st_&0x1000u))step=pad(ok_,0);
+        else if(!(st_&0x4000u)&&(st_&0x1000u)){step=pad(ok_,0);
+            // message.c:327-347: Umblaettern setzt mes_fls 0, der Pfeil (Code 29) steht im selben Durchlauf.
+            if(step==Step::Turned)fls_=0;if(fls_<24)arrow_drawn_=true;fls_=(fls_+1)&0x1Fu;}
         else if(held_&&!(st_&0x400u))ct_+=4; // pad_on 0x800 without FE00
         else ++ct_;
     }
@@ -94,7 +98,7 @@ MessageDialog::Step MessageDialog::update(){
 MessageDialog::Step MessageDialog::press(bool ok,int direction){
     moved_=false;if(!active_||frame_tim_)return Step::None;
     parse();
-    if((st_&0x8000u)||(!(st_&0x4000u)&&(st_&0x1000u)))return pad(ok,direction);
+    if((st_&0x8000u)||(!(st_&0x4000u)&&(st_&0x1000u))){const auto step=pad(ok,direction);if(moved_)fls_=0;return step;} // message.c:273/282
     return Step::None;
 }
 }

@@ -32,6 +32,11 @@ public:
     void queue_ok(){ok_=true;}
     void queue_move(int direction){move_+=direction;}
     bool moved()const{return moved_;}
+    // bhDispFont der letzten Runde (message.c:297-305/339-347): Code 28 an mes_sps[mes_sel] bzw. Code 29
+    // an mes_spos[mode][2..3], jeweils nur bei mes_fls < 24; mes_fls laeuft (x + 1) & 0x1F, 0 bei
+    // bhSetMessage, bei jeder Auswahlbewegung und beim Umblaettern. -1 = kein Cursor.
+    int cursor_drawn()const{return cursor_drawn_;}
+    bool arrow_drawn()const{return arrow_drawn_;}
     // The message bits of sys->st_flg as bhControlMessage leaves them (0x80000 default
     // selection, 0x8000 choice open, 0x4000 end reached, 0x1000 page complete, 0x800 timer,
     // 0x400 line wait). They are one variable with the script's st_flg (bhFlagCk type 5);
@@ -45,6 +50,7 @@ public:
     Step press(bool ok,int direction);
     int selection=0;
 private:
+    unsigned fls_=0;int cursor_drawn_=-1;bool arrow_drawn_=false; // sys->mes_fls und die Zeichnung der Runde
     bool active_=false,ok_=false,held_=false,moved_=false;
     int move_=0;
     unsigned index_=0,st_=0,tim_=0,frame_tim_=0,seln_=0;

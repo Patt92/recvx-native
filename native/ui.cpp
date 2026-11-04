@@ -4,6 +4,7 @@
 #include "binary_view.h"
 #include "item_asset.h"
 #include "typewriter.h"
+#include "ranking.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -611,6 +612,77 @@ void GameUi::draw_typewriter(SoftwareRenderer& image,const Typewriter& screen){
         arrow(256,359,screen.selection()+2);
     }
 }
+void GameUi::draw_ranking(SoftwareRenderer& image,const Ranking& r){
+    // bhRankingCall/RankingTextureInit: njSetBackColor(0,0,0); Task 7 zeichnet nicht (tk_flg 0x702040),
+    // jedes Bild beginnt mit der Loeschfarbe.
+    std::fill(image.canvas().begin(),image.canvas().end(),0xff000000u);
+    auto glyph=[&](unsigned code,float x,float y,std::uint32_t argb){ // bhDispFontEx, FontScale 1
+        Message m{std::uint16_t(code),0xffff};direct_message(image,m,x,y,argb);};
+    if(const int mes=r.save_message();mes>=0){
+        // AutoSaveLoadEasyDispMessage(-1, y, SaveLoadMessage, n) unter bhFontScaleSet(0.75, 0.75, 0.75):
+        // jede Zeile mittig, bhDispMessage(sx, sy, -1, 2, 0, 0, 0) in Weiss, Zeilenabstand 30 * 0.75.
+        const auto message=system_save_host_message(mes);float y=system_save_message_y(mes);std::size_t begin=0;
+        while(begin<message.size()){
+            std::size_t end=begin;float width=0;for(;end<message.size()&&message[end]!=0xff00&&message[end]!=0xffff;++end){const auto c=message[end];width+=(c==0xff01?14.f:(c<std::size(FontSz)?FontSz[c]:0.f))*.75f;}
+            Message line(message.begin()+std::ptrdiff_t(begin),message.begin()+std::ptrdiff_t(end));line.push_back(0xffff);
+            direct_message(image,line,320.f-width/2.f,y,0xffffffffu,.75f,.75f,.75f);
+            if(end==message.size()||message[end]==0xffff)break;begin=end+1;y+=30.f*.75f;
+        }
+    }
+    if(!r.drawn_main())return;
+    const std::pair<bool,unsigned> key{r.wallpaper_disc2(),r.wallpaper()};
+    if(!ranking_textures_.count(key)){
+        const auto id=asset_number(r.wallpaper());const auto archive=std::string(r.wallpaper_disc2()?"ITEM2":"ITEM1");
+        auto textures=load_texture_bundle_files(data_/"archives"/archive/(id+".bin"),data_,mods_,std::filesystem::path("ranking")/(archive+"-"+id));
+        if(textures.size()<2)throw std::runtime_error("ranking wallpaper requires original "+archive+"/"+id+" textures (2)");
+        ranking_textures_[key]=std::move(textures);
+    }
+    const auto& wall=ranking_textures_.at(key);
+    auto quad=[&](unsigned tex,float x,float y,float w,float h,float u2,float v2){
+        PulseQuad q{{{x,y,0,0,0xff808080u,0},{x+w,y,u2,0,0xff808080u,0},{x,y+h,0,v2,0xff808080u,0},{x+w,y+h,u2,v2,0xff808080u,0}}};
+        pulse_quad(image,wall.at(tex),q);};
+    // Zeichenfolge im OT (ps2_dummy.c:432-442): sz = a + b / pri steigt mit pri -> 0; WallPaperDisp (pri 0.1)
+    // liegt in Fach 0, DispRankingData (-3/-2) vor FadePolyDisp (-1.5), GetMessage (-1) zuletzt.
+    quad(0,0,0,512,480,1.f,.93f);quad(1,512,0,128,480,.5f,.93f);   // WallPaperDisp
+    const unsigned a=r.alpha();
+    auto time=[&](float x,float y,int value,std::uint32_t argb,unsigned flg){ // bhDispTimeEx (message.c:892)
+        static constexpr unsigned ntb[10]={16,17,18,19,20,21,22,23,24,25};
+        int hour=value/216000,min,sec,msc;
+        if(r.gm_mode()==3){if(hour>=1){hour=0;min=59;sec=59;msc=99;}else{hour=0;min=(value/3600)%60;sec=(value/60)%60;msc=((value%60)*10)/6;}}
+        else{if(hour>99){hour=99;min=59;sec=59;}else{min=(value/3600)%60;sec=(value/60)%60;}msc=((value%60)*10)/6;}
+        auto size=[](unsigned c){return c<108?float(FontSz[c]):0.f;};
+        if(flg&8){glyph(ntb[hour/10],x,y,argb);x+=20;glyph(ntb[hour%10],x,y,argb);x+=20;glyph(26,x,y,argb);x+=size(26);}
+        if(flg&4){if((!(flg&8)&&min/10)||(flg&8))glyph(ntb[min/10],x,y,argb);x+=20;glyph(ntb[min%10],x,y,argb);x+=20;
+            const unsigned cd=(flg&8)?26:7;glyph(cd,x,y,argb);x+=size(cd);}
+        if(flg&2){glyph(ntb[sec/10],x,y,argb);x+=20;glyph(ntb[sec%10],x,y,argb);x+=20;if(!(flg&8)){glyph(2,x,y,argb);x+=size(2);}}
+        if(flg&1){glyph(ntb[msc/10],x,y,argb);x+=20;glyph(ntb[msc%10],x,y,argb);}
+    };
+    auto rank=[&](float x,float y,std::uint32_t argb,int value){ // DispRank (ranking.c:709)
+        unsigned code;switch(value){case 1:code=33;break;case 2:code=34;break;case 4:code=35;break;case 8:code=36;break;case 16:code=37;break;case 32:code=38;break;
+            default:throw std::runtime_error("DispRank: rank outside AllRanking values");}
+        glyph(code,x,y,argb);};
+    auto number=[&](float x,float y,int value,std::uint32_t argb){ // DispNumber (ranking.c:854), mesdeftbl (bup_00.c:21)
+        glyph(16u+unsigned(value/10),x,y,argb);x+=28;glyph(16u+unsigned(value%10),x,y,argb);};
+    auto message=[&](unsigned id,float x,float y,std::uint32_t argb){direct_message(image,system_message(id),x,y,argb);}; // bhDispMessageEx(.., 1, id, argb, 0)
+    if(r.gm_mode()==0){ // DispRankingData00 (ranking.c:741)
+        const std::uint32_t argb=(a<<24)|0xFFFFFFu;
+        message(265,64,64,argb);message(269,32,175,argb);message(270,32,240,argb);message(271,32,304,argb);message(272,32,368,argb);
+        rank(576,175,argb,r.ranking());time(416,240,r.time(),argb,14);number(544,304,r.save_ct(),argb);number(544,368,r.retry_ct(),argb);
+    }else if(r.gm_mode()==3){ // DispRankingData01 (ranking.c:776)
+        std::uint32_t argb=(a<<24)|0xFFFFFFu;
+        message(264,121,64,argb);message(266,40,128,argb);message(268,119,224,argb);message(269,78,328,argb);
+        argb=(a<<24)|0x20FF20u;message(267,360,128,argb);message(268,439,224,argb);message(269,398,328,argb);
+        time(88,264,r.time(),(a<<24)|(r.col()!=0?0xFF2020u:0xFFFFFFu),7);
+        time(408,264,r.tmbk(),(a<<24)|(r.col()==2?0xFF2020u:0x20FF20u),7);
+        if(!r.ev75())rank(149,368,(a<<24)|0xFFFFFFu,r.ranking());
+        if(r.best_rank()!=32)rank(469,368,(a<<24)|0x20FF20u,r.best_rank());
+    }
+    { // FadePolyDisp: njDrawPolygon2D schwarz, Alpha sfe->alpha, GS-Verhaeltnis (a+1)>>1 (screen_fade.h)
+        const unsigned ratio=(r.fade_alpha()+1u)>>1;
+        if(ratio)for(auto& d:image.canvas()){std::uint32_t out=0xff000000u;for(unsigned shift:{0u,8u,16u})out|=std::min(255u,(((d>>shift)&255u)*(128u-ratio)+64u)/128u)<<shift;d=out;}
+    }
+    if(r.message()>=0)message(unsigned(r.message()),r.message_x(),r.message_y(),(r.message_alpha()<<24)|0xFFFFFFu); // GetMessage, pri -1
+}
 void GameUi::draw_pause(SoftwareRenderer& image,bool controller_present)const{
     // screen.c bhDrawScreenSaver: mode 8/6, a black 640x480 polygon with
     // sys->ssv_an=64.  With black source that is dest * (255-64)/255.
@@ -656,7 +728,9 @@ void GameUi::text(SoftwareRenderer& image,const Message& message,int x,int y,flo
         // bhDispItemName advances the actual font cursor, including variable
         // glyph widths. Character-count estimates overlap the following '?' .
         if(c==0xff03){if(i+1>=part.size())break;if(depth>=4)throw std::runtime_error("recursive item-name message");write(read_message(messages_,4,part[++i]),depth+1);continue;}
-        if(c==0xff04){if(choice++==selected_choice)blit(image,menu_[0],x,y+int(5*yscale),int(18*scale),int(18*yscale),0,28,18,46);x+=int(28*scale);continue;}if(c>=0xfe00){if(c<0xff00)color=font_color(c);continue;}if(c/324>=fonts_.size())continue;
+        // FF04 (message.c:133-149): mes_sps[mes_seln] = Lage vor dem Vorschub; dort zeichnet bhControlMessage
+        // den Auswahlcursor als Schriftzeichen 28 (bhDispFont(&mes_sps[mes_sel], 28, 0, -0.9), :297-303).
+        if(c==0xff04){if(choice++==selected_choice)blit(image,(dialogue?dialog_fonts_:fonts_)[0],x,y,int(28*scale),int(28*yscale),(28%18)*14,(28/18)*14,(28%18)*14+14,(28/18)*14+14,color);x+=int(28*scale);continue;}if(c>=0xfe00){if(c<0xff00)color=font_color(c);continue;}if(c/324>=fonts_.size())continue;
         const auto glyph=c%324;blit(image,(dialogue?dialog_fonts_:fonts_)[c/324],x,y,int(28*scale),int(28*yscale),(glyph%18)*14,(glyph/18)*14,(glyph%18)*14+14,(glyph/18)*14+14,color);
         x+=int((c<std::size(FontSz)?FontSz[c]:28)*scale);
       }
@@ -860,7 +934,8 @@ void GameUi::draw_box(SoftwareRenderer& image,const Inventory& inv,const StatusM
         icon(image,id,x,y);if(id)quantity(image,inv.slots()[slot],x,y);
         if(slot>1)cell+=id&&(itemdata[id].type&0x100)?2:1;if(cell>=inv.capacity())break;
     }
-    const auto packed=selecting?inv.items[base+index]:inv.slots()[menu.selected];if(menu.message.active())text(image,menu.message.visible(),44+dx(6),342+dy(6),1,0xffffffff,true,int(menu.message.selection));else if(note)text(image,system_message(note),44+dx(6),342+dy(6),1,0xffffffff,true);else if(Inventory::id(packed))text(image,read_message(messages_,4,inventory_name_id(packed)),44+dx(6),342+dy(6),.95f);
+    const auto packed=selecting?inv.items[base+index]:inv.slots()[menu.selected];if(menu.message.active()){text(image,menu.message.visible(),44+dx(6),342+dy(6),1,0xffffffff,true,menu.message.cursor_drawn());
+        if(menu.message.arrow_drawn())text(image,Message{29,0xffff},212+dx(6),432+dy(6),1,0xffffffff,true);} /* mes_spos[1][2..3] (message.c:9-13, :341-344) */else if(note)text(image,system_message(note),44+dx(6),342+dy(6),1,0xffffffff,true);else if(Inventory::id(packed))text(image,read_message(messages_,4,inventory_name_id(packed)),44+dx(6),342+dy(6),.95f);
 }
 void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu& menu,const MessageDialog& dialog,unsigned tick){
     // Waehrend bhSysCallMonitor Modus 5 laeuft Task 9 nicht und zeichnet nichts; Task 7 zeichnet
@@ -992,6 +1067,7 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
     const auto& visible_dialog=menu.active&&menu.message.active()?menu.message:dialog;
     // bhControlMessage mode 1 uses mes_spos[1], replacing the item name.
     // Room dialogue uses mode 0; neither mode draws a background panel.
-    if(visible_dialog.active()&&std::any_of(visible_dialog.page().begin(),visible_dialog.page().end(),[](auto code){return code<0xfe00||code==0xff03;}))text(image,visible_dialog.visible(),menu.active?44:68,menu.active?342:374,1,0xffffffff,true,int(visible_dialog.selection));
+    if(visible_dialog.active()&&std::any_of(visible_dialog.page().begin(),visible_dialog.page().end(),[](auto code){return code<0xfe00||code==0xff03;})){text(image,visible_dialog.visible(),menu.active?44:68,menu.active?342:374,1,0xffffffff,true,visible_dialog.cursor_drawn());
+        if(visible_dialog.arrow_drawn())text(image,Message{29,0xffff},menu.active?212:306,menu.active?432:434,1,0xffffffff,true);} /* mes_spos[mode][2..3] */
 }
 }

@@ -40,6 +40,9 @@ tables. Texture banks are shared according to `bhSetEneMdl` identity. Empty
 
 ## Open work
 
+The optional [Player 2 framework](PLAYER2.md) is a separate host extension for
+local input and programmable NPC control; its open bindings are documented there.
+
 - Face and lip morphs from MASK packets.
 - Exact PS2 material shading and EasyLight.
 - Arm IK (`bhArmIkMdk`).

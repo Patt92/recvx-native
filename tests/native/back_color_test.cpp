@@ -9,6 +9,7 @@
 #include "movie.h"
 #include "typewriter.h"
 #include "computer.h"
+#include "screen_fade.h"
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -152,7 +153,11 @@ int main(int argc,char**argv){try{
   {set_back_color(0x00123456);std::vector<std::uint8_t> raw(1500);const float version=1.73f;std::memcpy(raw.data(),&version,4);
    for(const auto [at,v]:std::initializer_list<std::pair<unsigned,unsigned>>{{16,64},{28,1100},{102,1400},{1100,16},{1104,18},{1108,80},{1112,110}})std::memcpy(raw.data()+at,&v,4);
    Inventory inv;MessageDialog dialog;EventVm ev(raw,inv,dialog);ComputerTerminal terminal(data);check(!terminal.begin(ev),"no request, no terminal");equal(installed_back_color(),0x00123456,"terminal without request keeps Db.clear");
-   ev.flags[10][0]|=0x400000u;ev.com_number=0;check(terminal.begin(ev),"bhEvtComSet request starts the terminal");equal(installed_back_color(),0,"system.c:2123 terminal");}
+   ev.flags[10][0]|=0x400000u;ev.com_number=0;check(terminal.begin(ev),"bhEvtComSet request starts the terminal");
+   // system.c:592-596/2118-2124: erst nach dem 5-Bild-Fade (cb_flg 0x2) setzt mn_mode0 7 den Hintergrund.
+   equal(installed_back_color(),0x00123456,"terminal keeps Db.clear while the fade runs");
+   for(unsigned i=0;i<8&&!terminal.running();++i){control_screen_fade(ev.flags[10][0]);terminal.monitor(ev);}
+   check(terminal.running(),"mn_mode0 7 ends after the fade");equal(installed_back_color(),0,"system.c:2123 terminal");}
   // Clear alpha above 128 is kept raw (GS RGBAQ byte) and reported by the room while it draws over it.
   set_back_color(0xff123456);equal(a.rendered_clear(),0xff123456,"A>128 keeps RGB, host alpha saturates");
   check(a.world.unbound_enemy_routines().count("njSetBackColor: clear alpha >128 exceeds native destination-alpha domain"),"A>128 destination-alpha gap reported");

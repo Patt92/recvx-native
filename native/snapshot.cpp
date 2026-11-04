@@ -85,7 +85,7 @@ Snapshot capture_snapshot(const Inventory& inventory,const EventVm& events,unsig
     s.spray_ct=inventory.spray_count;s.retry_ct=inventory.retry_count; // sys->spray_ct/retry_ct liegen im SAVEFILE-Bereich (room.c:1033)
     s.ply_pos=player.position;s.ply_ang=player.yaw;
     s.ply_wno[s.ply_id]=std::int8_t(inventory.weapon());s.ply_hp[s.ply_id]=std::int16_t(inventory.hp);
-    s.stv_tm=std::int32_t(inventory.play_time);
+    s.stv_tm=std::int32_t(inventory.play_time);s.time=std::int32_t(inventory.game_time);
     auto& h=snap.host;h.room=room;h.body=body;
     for(unsigned i=0;i<4;++i)h.session_flags[i]=events.flags[session_matrices[i]];
     for(unsigned i=0;i<3;++i)h.session_values[i]=events.values[session_values[i]];
@@ -95,7 +95,7 @@ Snapshot capture_snapshot(const Inventory& inventory,const EventVm& events,unsig
 void restore_inventory(const Snapshot& snap,Inventory& inventory){
     const auto& s=snap.save;if(s.ply_id<0||s.ply_id>3)throw std::runtime_error("snapshot player id invalid");
     inventory.spray_count=s.spray_ct;inventory.retry_count=s.retry_ct;inventory.items=s.itm;inventory.player=unsigned(s.ply_id);inventory.game_mode=unsigned(s.gm_mode);inventory.save_ct=s.save_ct;
-    inventory.hp=s.ply_hp[s.ply_id];inventory.max_hp=snap.host.max_hp;inventory.play_time=std::uint32_t(s.stv_tm);
+    inventory.hp=s.ply_hp[s.ply_id];inventory.max_hp=snap.host.max_hp;inventory.play_time=std::uint32_t(s.stv_tm);inventory.game_time=std::uint32_t(s.time);
     // bhPopGameData restores sys->ply_hp / sys->ply_stflg together with the pip
     // bank. Keep the per-player arrays in step with the live player so a later
     // bhPlayerChangeSet saves and restores the complete stored plp->stflg.

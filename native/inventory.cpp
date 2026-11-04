@@ -368,12 +368,32 @@ bool Inventory::reload(){
     return false;
 }
 Inventory::Inventory(){
-    // AllItemInit, normal new game, no bonus unlocks.
-    items[1]=0x370001;items[2]=0x910001;
-    items[18]=0x80001;items[19]=0x50012;items[20]=0xc001e;items[21]=0x140001;
-    items[32]=2;items[33]=0x8a0001;items[34]=0x220190;items[383]=1;
+    all_item_init(0); // AllItemInit des Neuen Spiels ohne Systemspeicher
     // system.c:483-489: every player starts at the game-mode HP.
     const int initial=max_hp;for(auto& v:ply_hp)v=initial;
+}
+void Inventory::all_item_init(std::uint32_t ssd_flg){
+    // sub1.c:8442-8445 boxinit/sboxinit (gm_mode 1/2: Kiste sys->itm[64..], Zweitkiste [192..]).
+    static constexpr std::uint32_t boxinit[2][32]={{0x00000007,0x000C001E,0x00120024,0x0023000A,0x00140001,0x00140001,0x00140001,0x001F0012},
+        {0x00000014,0x00070012,0x00120036,0x0023001E,0x00060006,0x000F001E,0x00100014,0x00110014,0x00040007,0x000E002A,0x00200006,0x000D0012,0x0002012C,0x002A012C,0x00130012,0x00140001,0x00140001,0x00140001,0x00140001,0x00140001,0x00140001}};
+    static constexpr std::uint32_t sboxinit[2][32]={{0x00000004,0x00140001,0x00140001,0x00140001,0x001F0006},{0x00000004,0x000C0078,0x00140001,0x00140001,0x00140001}};
+    items.fill(0);
+    const int gm=int(game_mode);
+    if(gm==1){for(unsigned i=0;i<boxinit[0][0];++i)items[64+i]=boxinit[0][i+1];for(unsigned i=0;i<sboxinit[0][0];++i)items[192+i]=sboxinit[0][i+1];}
+    else if(gm==2){for(unsigned i=0;i<boxinit[1][0];++i)items[64+i]=boxinit[1][i+1];for(unsigned i=0;i<sboxinit[1][0];++i)items[192+i]=sboxinit[1][i+1];}
+    if(gm!=3){
+        // :8501-8520 swork.pip = sys->itm: [1] 0x370001, [2] 0x910001, dann ab [3] die Systemspeicherboni.
+        // ic_flg[15] &= ~0x80000000 (:8506) liegt im EventVm; beim Neuen Spiel ist er neu und das Bit 0.
+        unsigned temp=1;items[1]=0x370001;items[2]=0x910001;
+        if(ssd_flg&0x2){items[temp+2]=0x8010001;++temp;}
+        if(gm==2)items[temp+2]=0x81F0001;
+        // :8523-8536 swork.pip = &sys->itm[16].
+        items[17]=0;items[18]=0x80001;items[19]=0x50012;items[20]=0xC001E;items[21]=0x140001;
+        if(gm==2)items[22]=0x81F0001;
+    }
+    items[33]=0x8A0001;                                       // :8539-8547 swork.pip = &sys->itm[32]
+    if(gm!=3){items[32]=2;items[34]=0x220190;}
+    items[383]=1;
 }
 unsigned Inventory::switch_player(unsigned target,std::uint32_t* stflg){
     if(target>=ply_hp.size())throw std::runtime_error("bhPlayerChangeSet target outside the original player table");

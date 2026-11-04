@@ -12,6 +12,7 @@
 namespace recvx {
 class EventVm;
 class Typewriter;
+class Ranking;
 enum class MenuInput {Open,Cancel,Confirm,Up,Down,Left,Right};
 // Status/ItemBox screen slide (sub1.c SpriteH, SpriteUV, StatusCancel, BGFadeIn/Out):
 // the twelve sprite centers (cen_pos) move 1/8 of their delta for eight ticks plus
@@ -224,6 +225,8 @@ public:
     void reload_textures();
     // Original bup_00 / McSaveFile / SaveScreen / LoadScreen assets and messages.
     void draw_typewriter(SoftwareRenderer& image,const Typewriter& screen);
+    // ranking.c Task 13: Systemspeicher-Meldung (typ_md0 3) bzw. RankingMain (typ_md0 4) des Bildes.
+    void draw_ranking(SoftwareRenderer& image,const Ranking& ranking);
     // ADV/0002 title textures (AdvEasySetupTextureBasic): 0 = list texture 0
     // (background picture), 2 = list texture 1 (plate atlas). Loads on demand.
     const SceneTexture& title_texture(unsigned index);
@@ -242,6 +245,7 @@ private:
     void quantity(SoftwareRenderer&,std::uint32_t packed,int x,int y,bool box=false)const;
     void load_title();
     std::vector<SceneTexture> title_,typewriter_textures_;
+    std::map<std::pair<bool,unsigned>,std::vector<SceneTexture>> ranking_textures_; // RankingTextureInit: ITEM1/2 277 + no
     // Direct bhDispMessage/Ex semantics: ignores inline colour/choice opcodes,
     // unlike MessageDialog text(). Original fonts, fractional cursor advances.
     void direct_message(SoftwareRenderer&,const Message&,float x,float y,std::uint32_t color,float sx=1,float sy=1,float line=1,unsigned count=0,bool spaces_count=false)const;

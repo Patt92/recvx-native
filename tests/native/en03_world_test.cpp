@@ -159,5 +159,22 @@ int main(int argc,char** argv){try{
         f.tick();
         check(e.mode0==1&&e.exp0!=nullptr,"Gegenprobe: mit Gegnerpass laeuft Init");
     }
+    {
+        // en03.c:4558 DD03 (Zerfall): fuer jedes noch ganze Bein schreibt das Original ueber den Kindzeiger
+        // EXP0_BYTE(i, 12/14/15) und EXP0_INT(i, 980) DIREKT in den Kind-BH_PWORK (macros.h:82-83):
+        // mode0 = 1, mode2 = 0, mode3 = 0, ct0 = EXP0_C(105) (Disassembly bhEne03_DD03 0x19E1E0-0x19E218).
+        // Danach fliegt jedes Bein im eigenen bhEne03s_MV00. Vorbedingung (Diagnose): Tod Modus 3.
+        Fixture f(data);f.tick();auto& e=f.spider();auto* s=static_cast<RECVX_EN03_STATE*>(e.exp0);
+        for(int i=0;i<8;++i)check(s->legs[i]&&s->legs[i]->mode0==2,"Beinkind vor dem Zerfall in bhEne03s_Dummy");
+        e.hp=-1;e.mode0=4;e.mode1=0;e.mode2=3;e.mode3=0;f.tick();
+        // bhEne03s_MV00 case 0 laeuft im selben Bild (Kinder stehen in ene[] hinter dem Elternwork) und
+        // ueberschreibt ct0 mit seinem Flugzaehler: belegt wird der Uebergang Dummy -> Move.
+        for(int i=0;i<8;++i){const auto* c=s->legs[i];
+            check(c->mode0==1&&c->mode2==0&&c->mode3==1,"DD03: Beinkind nicht in bhEne03s_Move/MV00 umgeschaltet");}
+        const float y0=s->legs[0]->py;
+        for(int i=0;i<10;++i)f.tick();
+        check(s->legs[0]->mode3>0,"bhEne03s_MV00 laeuft nicht nach dem Zerfall");
+        std::cout<<"  DD03: acht Beinkinder fliegen (Bein 0 y "<<y0<<" -> "<<s->legs[0]->py<<")\n";
+    }
     std::cout<<"EN03 world PASS\n";return 0;
 }catch(const std::exception& ex){std::cerr<<ex.what()<<'\n';return 1;}}

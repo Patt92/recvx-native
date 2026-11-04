@@ -23,6 +23,15 @@ current code, working tree and installed runtime.
 
 ## Working tree and delivery
 
+**Open-mechanism sweep (2026-11-04, working tree):** 34 ledger entries closed (84.1 % -> 88.2 %, 658/746). New native owners: ranking.c ControlRanking (Task 13 after bhRankingCall, ranking screen, scores, BGM, messages) with the system save as a host file (system.rcvxsys, CONFIGFILE + Check_Sam, SysSaveHikaku), AllItemInit with the ssd_flg 0x2 rocket-launcher bonus, sys->time; terminal entry/exit fades (bhCheckSubTask 5-frame fade, monitor mode 7, sp_evt.c:764); message cursor/page arrow as font glyphs 28/29 with mes_fls blinking; player eye blinking and plp->txp[k] (EN05 corpse texture); effect links to child works via the ene[] slot (EN13 natural death); Common 7 object flr_no; item links no longer inherit the carrier visibility. Corrected: the 2026-10-23 ORIGINAL-FIX on EN03 EXP0_INT(i, 980) was wrong - the macro writes the child BH_PWORK (mode0/ct0), so the eight legs now fly in bhEne03s_MV00 after DD03/DamageInit. New ORIGINAL-FIX: bhItmSetCk out-of-range rom->etcp writes (RM_3100/3140/7030). Several entries closed by reachability evidence (script reach scan by work kind). Tests: ranking_system_save, message_blink, common25_player_motion_range, item_link_visibility, itmsetck_out_of_range, player_eye_texture, extended EN03/EN05/EN13/Common 7/terminal checks, each with a red counter-check. Full suite 264/266 (iOS bundle/HD build pre-existing). Window acceptance of the ranking screen, blinking and the terminal fade is with the user.
+
+**Player-2 framework (working tree / macOS arm64 build):** optional local-player and
+NPC command sources share a World-owned actor, native movement and committed pose.
+Controller routing, hotplug, mode switching and runtime inventory hold checked;
+two-character diagnostic view inspected. [Scope and open bindings](docs/PLAYER2.md).
+Evidence: `tests/native/player2_test.cpp`, `tools/verify_player2.py`,
+`build/validation/player2/`. No app/package replacement or complete co-op acceptance.
+
 **Parallel batch EN09 frame 70, EN26 brain route, bhEff130 room run (2026-11-04, working tree):** en09.c:5420 bhEne09_PlyDG00 frame 70 (player hit 5, three bhSetEffParticle, bhSetEffectTb id 5 type 2) replaces the named gap; `pd` is uninitialised in the original (sp+0x50, disassembly 0x1CD560) and set to 0 as ORIGINAL-FIX (QUALITY.md rule 4). Test enemy_en09_world (RM_1060 lethal grab) with counter-check. EN26: Brain00 with and without route zones now tested (en26_brain_route, counter-check red); the PlayerLink gap stays open: defect proven (0x20b9f0, $s0 = epw), reachability not. bhEff130 type 4/6: room run RM_0060 (launch, flight, trails, wall/enemy hit, impact effects, light, CombatController fire with items 11/1) in effect_eff130_world, three counter-checks red (wall pullback, ps.x/23.x sign).
 
 **Grenade launcher drum effect ported (2026-11-03, working tree):** weapon.c:360 bhActionWeapon drum (flg 0x800000)

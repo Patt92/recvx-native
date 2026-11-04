@@ -43,7 +43,10 @@ struct InputConfig {
 };
 class InputManager {
 public:
-    explicit InputManager(InputConfig config);
+    // Optional host multiplayer routing. Slots survive another pad's removal;
+    // -1 keeps the original single-player merge of all controllers.
+    struct Route {bool keyboard;int controller_slot;};
+    explicit InputManager(InputConfig config,Route route={true,-1});
     ~InputManager();
     InputManager(const InputManager&)=delete;
     InputManager& operator=(const InputManager&)=delete;
@@ -60,8 +63,10 @@ public:
     // scePadSetActDirect of the frame: big motor (low frequency) and small motor.
     void rumble(unsigned low,unsigned high,unsigned milliseconds);
 private:
-    struct Pad {SDL_GameController* handle=nullptr;std::array<Sint16,SDL_CONTROLLER_AXIS_MAX> axes{};std::array<Uint8,SDL_CONTROLLER_BUTTON_MAX> buttons{};};
+    struct Pad {SDL_GameController* handle=nullptr;unsigned slot=0;std::array<Sint16,SDL_CONTROLLER_AXIS_MAX> axes{};std::array<Uint8,SDL_CONTROLLER_BUTTON_MAX> buttons{};};
     InputConfig config_;
+    Route route_;
+    bool accepts(const Pad& pad)const{return route_.controller_slot<0||pad.slot==unsigned(route_.controller_slot);}
     std::array<bool,SDL_NUM_SCANCODES> keys_{};
     std::map<SDL_JoystickID,Pad> pads_;
     std::array<bool,action_count> held_{},pending_{},suppressed_{};

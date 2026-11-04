@@ -1,4 +1,5 @@
 #include "computer.h"
+#include "screen_fade.h"
 #include "back_color.h"
 #include "asset_io.h"
 #include "audio.h"
@@ -18,8 +19,24 @@ bool ComputerTerminal::begin(EventVm& events){
                                   events.flags[11][0],events.flags[12][0]};
     recvx_com_begin(events.com_number,&before);
     *frame_={};frame_->active=1;active_=true;pending_=0;character_gaps_=0;message_gaps_=0;
-    set_back_color(0); // bhMainSequence mn_mode 7 case 2 (system.c:2120-2124), the terminal's texture read
+    // system.c:592-596: mn_mode0 7, bhSetScreenFade(0xFF000000, 5). The monitor task runs later in the
+    // same frame: mn_md1 0 falls through to 1 and requests SYSTEM entry 2 (:2087-2115) -> mn_md1 2.
+    set_screen_fade(events.flags[10][0],0xFF000000u,5.0f);monitor_=2;
     return true;
+}
+void ComputerTerminal::monitor(EventVm& events){
+    if(!active_)return;
+    auto& cb=events.flags[10][0];auto& ts=events.flags[12][0];
+    switch(monitor_){
+    case 2: // system.c:2118-2129: Task 7 stops once the fade is done, njSetBackColor(0)
+        if(!(cb&0x2u)&&!(ts&0x80u)){ts|=0x80u;set_back_color(0);}
+        if(!(cb&0x2u))monitor_=3;
+        break;
+    case 3: // :2131-2147: ts_flg &= ~0x20000 (Task 17 bhSysCallCompEvent), mn done
+        ts&=~0x20000u;monitor_=0;
+        break;
+    default:break;
+    }
 }
 void ComputerTerminal::tick(unsigned held,unsigned pressed,EventVm& events,AudioMixer* audio){
     if(!active_)return;
@@ -42,6 +59,8 @@ void ComputerTerminal::tick(unsigned held,unsigned pressed,EventVm& events,Audio
         // (system.c:659/2121) and may change these words meanwhile (RM_1090
         // event 5: bhCineSet 1 clears cb_flg/st_flg 0x4), so the open-time copy
         // must not be written back.
+        // sp_evt.c:764 bhSetScreenFade(sys->fade_pbk, 3.0f): back from black to the target before the terminal.
+        set_screen_fade(events.flags[10][0],system_screen_fade().previous(),3.0f);
         events.flags[11][0]|=0x4u;events.flags[6][0]=~0u;events.flags[11][0]|=0x8000u;
         events.flags[5][0]&=~0x4000000u;events.flags[10][0]&=~0x400000u;
         events.flags[12][0]|=0x20000u;events.flags[12][0]&=~0x80u;
@@ -127,6 +146,10 @@ void ComputerTerminal::draw_character(SoftwareRenderer& image)const{
 }
 void ComputerTerminal::draw(SoftwareRenderer& image,const GameUi& ui,const EventVm& events)const{
     if(!active_||!frame_)return;
+    // mn_mode0 7 before Task 17: under the fade the room is still Task 7's (nothing to add); after ts_flg
+    // 0x80 the frame is the black back colour until the terminal's first pass.
+    if(monitor_==2)return;
+    if(monitor_==3){std::fill(image.canvas().begin(),image.canvas().end(),0xff000000u);return;}
     if(textures_.empty()||textures_mods_!=texture_mods_enabled()){
         // bhSetMemPvpTexture: SYSTEM entry 2 holds background, window/font/keyboard and icon pages.
         textures_=load_texture_bundle_files(data_/"archives/SYSTEM/0002.bin",data_,mods_,"computer");

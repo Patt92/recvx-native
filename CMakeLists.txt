@@ -153,13 +153,13 @@ set(RECVX_TABLES "${CMAKE_CURRENT_BINARY_DIR}/generated")
 # tools/generate_effect_collision.py ist Quarantaene (Policy 2026-10-09):
 # ATR-Boden/Wandkontakt, Reflexion und Linienabfrage sind eigenstaendig nativ;
 # der abwaerts getestete Zylinderdeckel bleibt eine belegte Semantikluecke.
-add_library(recvx_game native/file_folder.cpp native/effect_collision.cpp native/hit_model.cpp native/gameover.cpp native/effect_particles.cpp native/computer.cpp native/computer_core.c native/computer_tables.c native/subplayer.c native/enemies/en01_damage.c native/enemies/enemy_spawn.cpp native/effect_sprites.cpp native/effect_sprite_procedures.cpp native/effect_rap_camera.cpp native/effect_rap_blood.cpp native/effect_rap_claw.cpp native/effect_eff30x.cpp native/effect_eff130.cpp native/effect_eff199.cpp native/effect_eff013.cpp native/effect_sub3x.cpp native/weapon_fly.c native/inspection.cpp native/combat.cpp native/weapon_flash.cpp native/targeting.cpp native/weapon_asset.cpp native/box_menu.cpp native/inventory.cpp native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/audio_iop.cpp native/movie.cpp native/world.cpp native/back_color.cpp native/collision.cpp native/door_core.c native/doors.cpp native/item_tables.c native/status_pulse.cpp native/snapshot.cpp native/view_clip.cpp native/map_screen.cpp native/map_tables.c native/map_objects.cpp native/player_stairs.c native/player_action.c native/player_event.c native/player_hair.c native/player_head.c native/adx_tables.c)
+add_library(recvx_game native/player2.cpp native/file_folder.cpp native/effect_collision.cpp native/hit_model.cpp native/gameover.cpp native/effect_particles.cpp native/computer.cpp native/computer_core.c native/computer_tables.c native/subplayer.c native/enemies/en01_damage.c native/enemies/enemy_spawn.cpp native/effect_sprites.cpp native/effect_sprite_procedures.cpp native/effect_rap_camera.cpp native/effect_rap_blood.cpp native/effect_rap_claw.cpp native/effect_eff30x.cpp native/effect_eff130.cpp native/effect_eff199.cpp native/effect_eff013.cpp native/effect_sub3x.cpp native/weapon_fly.c native/inspection.cpp native/combat.cpp native/weapon_flash.cpp native/targeting.cpp native/weapon_asset.cpp native/box_menu.cpp native/inventory.cpp native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/audio_iop.cpp native/movie.cpp native/world.cpp native/back_color.cpp native/collision.cpp native/door_core.c native/doors.cpp native/item_tables.c native/status_pulse.cpp native/snapshot.cpp native/view_clip.cpp native/map_screen.cpp native/map_tables.c native/map_objects.cpp native/player_stairs.c native/player_action.c native/player_event.c native/player_hair.c native/player_head.c native/adx_tables.c)
 target_sources(recvx_game PRIVATE native/core_random.cpp native/object_itmbox.cpp native/world_itmbox.cpp native/world_water.cpp native/geometry_motion.cpp)
 # D10 Teil B: Kartenbild (Ps2AddPrim2D/3D-Seite von map.c) und sys->fade_* (screen.c).
 target_sources(recvx_game PRIVATE native/map_render.cpp native/screen_fade.cpp)
 # Gemeinsame Benutzerpfade (user_paths), Schreibmaschinen-Slots (save_slots) und
 # die Slotauswahl (typewriter). bup_00.c ControlTypewriter / ps2_SaveScreen.
-target_sources(recvx_game PRIVATE native/user_paths.cpp native/save_slots.cpp native/typewriter.cpp)
+target_sources(recvx_game PRIVATE native/user_paths.cpp native/save_slots.cpp native/typewriter.cpp native/system_data.cpp native/ranking.cpp)
 # C02: gemeinsamer Gegnerwork am WorldEntity-Besitzer, native Dispatchkette,
 # bhSetMotion/bhCalcModel des Besitzers und alle nativ vorhandenen Gegner-
 # routinen. en54/en55 fehlen bis zum Port von en17.c (Kettenwerk-Besitzer).
@@ -508,6 +508,11 @@ if(RECVX_BUILD_RUNTIME)
     add_executable(recvx-input-tests tests/native/input_test.cpp)
     target_link_libraries(recvx-input-tests PRIVATE recvx_input)
     add_test(NAME keyboard_controller_config COMMAND recvx-input-tests)
+    add_executable(recvx-player2-tests tests/native/player2_test.cpp)
+    target_link_libraries(recvx-player2-tests PRIVATE recvx_input)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0080.RDT")
+      add_test(NAME player2_framework COMMAND recvx-player2-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    endif()
     # message.c:269-295 / pad.c:275: real held direction versus newly pressed dialog bits.
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0060.RDT")
       add_test(NAME message_dialog_pad_edges COMMAND recvx-input-tests --dialog-edges "${CMAKE_CURRENT_SOURCE_DIR}/data")
@@ -720,6 +725,26 @@ if(BUILD_TESTING)
   add_executable(recvx-inventory-sort-tests tests/native/inventory_sort_test.cpp)
   target_link_libraries(recvx-inventory-sort-tests PRIVATE recvx_game)
   add_test(NAME inventory_item_sort COMMAND recvx-inventory-sort-tests)
+  add_executable(recvx-common25-motion-tests tests/native/common25_player_motion_test.cpp)
+  target_link_libraries(recvx-common25-motion-tests PRIVATE recvx_game)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/archives/SYSTEM")
+    add_test(NAME common25_player_motion_range COMMAND recvx-common25-motion-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  endif()
+  add_executable(recvx-item-link-visibility-tests tests/native/item_link_visibility_test.cpp)
+  target_link_libraries(recvx-item-link-visibility-tests PRIVATE recvx_game)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0070.RDT")
+    add_test(NAME item_link_visibility COMMAND recvx-item-link-visibility-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  endif()
+  add_executable(recvx-message-blink-tests tests/native/message_blink_test.cpp)
+  target_link_libraries(recvx-message-blink-tests PRIVATE recvx_game)
+  add_test(NAME message_blink COMMAND recvx-message-blink-tests)
+  add_executable(recvx-ranking-tests tests/native/ranking_test.cpp)
+  target_link_libraries(recvx-ranking-tests PRIVATE recvx_game)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/archives/ITEM2")
+    add_test(NAME ranking_system_save COMMAND recvx-ranking-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  else()
+    add_test(NAME ranking_system_save COMMAND recvx-ranking-tests)
+  endif()
   add_executable(recvx-save-slots-tests tests/native/save_slots_test.cpp)
   target_link_libraries(recvx-save-slots-tests PRIVATE recvx_game)
   add_test(NAME typewriter_save_slots COMMAND recvx-save-slots-tests)
@@ -913,6 +938,16 @@ if(BUILD_TESTING)
     --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
   add_test(NAME rm7250_spider_grab COMMAND "${Python3_EXECUTABLE}" -I
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm7250_spider_grab_check.py"
+      --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  endif()
+  if(TARGET recvx-runtime AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0020.RDT")
+    add_test(NAME player_eye_texture COMMAND "${Python3_EXECUTABLE}" -I
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/player_eye_texture_check.py"
+      --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  endif()
+  if(TARGET recvx-runtime AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_7030.RDT")
+    add_test(NAME itmsetck_out_of_range COMMAND "${Python3_EXECUTABLE}" -I
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/itmsetck_out_of_range_check.py"
       --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
   endif()
   if(TARGET recvx-runtime AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_1090.RDT")

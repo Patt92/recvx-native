@@ -1571,6 +1571,8 @@ if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign
             // native work (enemy/subplayer) is that work: its bhCalcModel (owP, read by e.g.
             // bhMotionPosSetEnePly) translates by w.px/py/pz and rotates by w.ax/ay/az.
             if(ctx.kind==4&&cmd==11){auto& s=sprites_.at(ctx.index).sprite;s.ax=e.angles[0];s.ay=e.angles[1];s.az=e.angles[2];}
+            // event.c:12053 gilt fuer jeden bhCetask->work: obwp/itwp flr_no (bhObj001 und die Objektwaende lesen es).
+            if((ctx.kind==2||ctx.kind==3)&&cmd==7)e.object_floor=floor_at(pos);
             if(ctx.kind==1&&e.enemy_bound){auto& w=e.enemy;
                 /* event.c:12053 work->flr_no = bhCheckFloorNum(py). e.object_floor ist die
                    Entitaetssicht desselben Felds: ohne sie uebernahm adopt_enemy_script beim
@@ -3719,7 +3721,10 @@ void RoomWorld::tick_after_player(){
                 if(work.weapon){work.weapon->tick();work.sprite.flg=work.weapon->flg;work.queued=work.weapon->queued;return;}
                 // effect.c:800: nur solange flg 0x80 steht (bhSetEffectLink/bhSetEffectTb); eine
                 // Prozedur, die es loescht (effsub6.c bhEff148), haelt ihre Lage selbst.
-                if(work.link&&work.link<=4&&(work.sprite.flg&0x80u)&&!(work.sprite.id==0&&work.sprite.mode0!=0)){ // bhEff000 links its joint only in mode 0
+                // effect.c:806-810: der Linkpunkt folgt nur einem aktiven Werk (pp->flg & 1); ein abgeschalteter
+                // Gegner (z. B. bhEneSetCk, Tod mit flg &= ~1) laesst px/py/pz auf dem letzten Stand.
+                const bool link_work_live=!(work.link==2||work.link==kEnemySlotLink+1)||!work.sprite.lkwkp||(static_cast<const RECVX_ENEMY_WORK*>(work.sprite.lkwkp)->flg&1u);
+                if(work.link&&(work.link<=4||work.link==kEnemySlotLink+1)&&(work.sprite.flg&0x80u)&&link_work_live&&!(work.sprite.id==0&&work.sprite.mode0!=0)){ // bhEff000 links its joint only in mode 0
                     // effect.c:812 njCalcPoint(&owp->mtx, &op->lox, &op->px): der Satz-Versatz lox/loy/loz,
                     // den Prozeduren wie bhEff352/354/371/373 selbst fortschreiben, nicht der Erzeuger-Versatz
                     // (bhSetEffectTb effect.c:481 / bhSetEffectLink room.c:787 schreiben ihn nur als Startwert).
@@ -3746,13 +3751,14 @@ void RoomWorld::tick_after_player(){
                 if(work.sprite.id==133){step_thermometer_effect(i);return;}
                 // Raumeffekt mit Gegnerlink (link 2): lkwkp = &ene[index] (room.c:849 bhSetEffectLink).
                 if(!work.sprite.lkwkp&&work.link==2){const auto at=entities_.find({1,work.index});if(at!=entities_.end()&&at->second.enemy_bound)work.sprite.lkwkp=&at->second.enemy;}
+                if(!work.sprite.lkwkp&&work.link==kEnemySlotLink+1&&work.index<RECVX_ENEMY_SLOTS)work.sprite.lkwkp=enemy_table_.slot[work.index];
                 if(supported_effect_sprite(work.sprite.id)){
                     // Rueckseitenbit des letzten Zeichenpasses (effect.c:1391).
                     if(effect_backface_.count(i))work.sprite.stflg|=0x10u;else work.sprite.stflg&=~0x10u;
                     // eff[n]-Platz und O_WRK.exp0-Elternsatz (effsub5.c 203/227/248 lesen ihn).
                     work.sprite.slot=int(i);
                     work.sprite.parent=work.sprite.parent_slot>=0&&std::size_t(work.sprite.parent_slot)<sprites_.size()?&sprites_[std::size_t(work.sprite.parent_slot)].sprite:nullptr;
-                    std::optional<BoneMatrix> link_node;if(work.link&&work.link<=4)link_node=link_matrix(work.link-1,work.index,work.node);
+                    std::optional<BoneMatrix> link_node;if(work.link&&(work.link<=4||work.link==kEnemySlotLink+1))link_node=link_matrix(work.link-1,work.index,work.node);
                     work.sprite.link_matrix=link_node?link_node->value:nullptr;
                     {auto control=effect_context();control.defer_custom_draw=true; // Zeichenteil: draw_stateful_effects
                      step_effect_sprite(work.sprite,control,&work.queued);}
@@ -3761,7 +3767,8 @@ void RoomWorld::tick_after_player(){
                     // bhEff013 im Gegner), folgt ab dem naechsten Pass effect.c:806 owP[lkono] dieses Werks.
                     if((work.sprite.flg&0x80u)&&work.sprite.lkwkp&&!work.link){unsigned at=0;
                         if(enemy_work_index(static_cast<const RECVX_ENEMY_WORK*>(work.sprite.lkwkp),at)){work.link=2;work.index=at;work.node=unsigned(work.sprite.lkono);work.sprite.link_kind=1;work.sprite.link_index=at;}
-                        else unbound_enemy_.insert("effect.c:806: op->lkwkp ohne Raumfigur");}
+                        else if(enemy_work_slot(static_cast<const RECVX_ENEMY_WORK*>(work.sprite.lkwkp),at)){work.link=kEnemySlotLink+1;work.index=at;work.node=unsigned(work.sprite.lkono);work.sprite.link_kind=int(kEnemySlotLink);work.sprite.link_index=at;}
+                        else unbound_enemy_.insert("effect.c:806: op->lkwkp ohne ene[]-Platz");}
                     // lkwkp = plp (effsub2.c:3184 bhEff_E12_FloorBlood2, :4266 bhEff_E14_Fire2): der Spieler ist kein
                     // Effekt-/Gegnerwerk; die Prozedur nennt ihn mit link_kind 0, danach gilt plp->mlwP->owP[lkono].
                     if((work.sprite.flg&0x80u)&&!work.sprite.lkwkp&&!work.link&&work.sprite.link_kind==0){work.link=1;work.index=0;work.node=unsigned(work.sprite.lkono);}
@@ -4428,6 +4435,7 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
         const std::size_t rest_end=scene.triangles.size();
         bool ordered=true;for(std::size_t i=body_end;i<rest_end;++i)ordered=ordered&&!scene.triangles[i].camera_mask&&!scene.triangles[i].player_body;
         if(ordered)insert_mirror_copy(scene,body_end,rest_end,rest_end,1,0,-1);else unbound_enemy_.insert("MdlPut.c:57 Spiegelaufruf: Spielerdreiecke nicht in der Folge Raum/Koerper/Objekte");}
+    if(!pass.small_screen&&(presentation_flags_&1u))append_player2(scene);
     for(const auto& model:models_){const auto found=entities_.find({model.kind,model.index});if(found==entities_.end()||(!(model.kind==1&&found->second.enemy_native)&&entity_hidden(model.kind,model.index)))continue;const auto& e=found->second;Scene object;
         // objitm.c:562/659/688: Raumobjekte und Raumitems mit flg 0x40000000
         // erreichen bhPutModel nur in den Schnitten ihrer hide[]-Liste.
@@ -4624,7 +4632,7 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
         if(s.tex_id<0||at>=effect_common_textures_.size()){unbound_enemy_.insert("bhDrawPolEffect: ef_tlist.textures[tex_id + ani_ct] ausserhalb der gemeinsamen Liste");continue;}
         const unsigned texture=unsigned(scene.textures.size());scene.textures.push_back(effect_common_textures_[at]);
         NJS_MATRIX matrix;if((s.flg&0x200000)||!(s.flg&0x80)){njUnitMatrix(&matrix);njTranslate(&matrix,s.px,s.py,s.pz);njRotateXYZ(&matrix,s.ax,s.ay,s.az);}
-        else {const auto parent=work.link&&work.link<=4?link_matrix(work.link-1,work.index,work.node):std::nullopt;
+        else {const auto parent=work.link&&(work.link<=4||work.link==kEnemySlotLink+1)?link_matrix(work.link-1,work.index,work.node):std::nullopt;
             if(!parent){unbound_enemy_.insert("bhDrawPolEffect: op->mtx ohne veroeffentlichte Elternmatrix");continue;}
             std::copy_n(parent->value,16,matrix);njTranslate(&matrix,s.lox,s.loy,s.loz);njRotateXYZ(&matrix,s.ax,s.ay,s.az);}
         std::copy_n(matrix,16,work.effect_root.value); // effect.c:1006/1010, vor Skalierung
@@ -4732,7 +4740,7 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
         // effect.c:1611-1621: ohne flg 0x80 oder mit 0x200000 Einheit + px/ax, sonst
         // lkwkp->mlwP->owP[lkono].mtx + lox/loy/loz und ax/ay/az (wie bhDrawTrsEffect3D :1338).
         const bool linked=(s.flg&0x80u)&&!(s.flg&0x200000u);
-        std::optional<BoneMatrix> parent;if(linked&&work.link&&work.link<=4)parent=link_matrix(work.link-1,work.index,work.node);
+        std::optional<BoneMatrix> parent;if(linked&&work.link&&(work.link<=4||work.link==kEnemySlotLink+1))parent=link_matrix(work.link-1,work.index,work.node);
         if(linked&&!parent){unbound_enemy_.insert("bhDrawThlEffect3D: lkwkp->mlwP->owP[lkono].mtx ohne nativen Knoten");continue;}
         NJS_MATRIX root;
         if(linked){std::copy_n(parent->value,16,root);njTranslate(&root,s.lox,s.loy,s.loz);njRotateXYZ(&root,s.ax,s.ay,s.az);}
@@ -4964,6 +4972,10 @@ void RoomWorld::control_item_glint(){
 }
 bool RoomWorld::entity_hidden(unsigned kind,unsigned index)const{
     if(!kind)return player_hidden;const auto e=entities_.find({kind,index});if(e==entities_.end())return false;
+    // objitm.c:314-323: nur Objekte uebernehmen stflg 0x1000000 ihres lkwkp. Items (bhDrawObjItm :553-562,
+    // bhControlObjItm :407) pruefen allein ihr eigenes stflg; ein gelinktes Item folgt der Matrix, nicht der
+    // Sichtbarkeit seines Traegers (bhObjLinkSetObjItem/EneItem/PlyItem, event.c:3806/3888/6915).
+    if(kind==3)return e->second.hidden||e->second.inactive;
     return e->second.hidden||e->second.inactive||(e->second.linked&&entity_hidden(e->second.parent_kind,e->second.parent_index));
 }
 // objitm.c:659 bhDrawObject, :688 bhDrawSpObject und :562 bhDrawObjItm (Items)
@@ -5053,6 +5065,7 @@ std::optional<BoneMatrix> RoomWorld::link_matrix(unsigned kind,unsigned index,un
         }
         return {};
     }
+    if(kind==kEnemySlotLink)return enemy_slot_joint_matrix(index,node); // Kindwork ohne Raumfigur: owP seines Baums
     const auto* e=state(kind,index);
     if(kind==1&&e&&e->enemy_native&&e->enemy_calculated&&e->enemy_asset){unsigned physical=0;try{physical=e->enemy_asset->model_index(node);}catch(const std::runtime_error&){return {};}if(physical<e->enemy_owp_mtx.size())return e->enemy_owp_mtx[physical];return {};}
     if(kind&&e)for(const auto& m:models_)if(m.kind==kind&&m.index==index){

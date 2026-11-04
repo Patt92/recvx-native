@@ -82,7 +82,7 @@ void recvx_en03s(RECVX_ENEMY_WORK* w);
    Der zweite Teil desselben Schreibvorgangs, EXP0_INT(pno,980), liegt 768 Byte
    hinter dem Block; das ist belegte Original-UB (Schreiben in fremden Speicher)
    und wird gemeldet, nicht nachgebildet. */
-void recvx_en03s_leg_mark(RECVX_ENEMY_WORK* child);
+void recvx_en03s_leg_mark(RECVX_ENEMY_WORK* child, int8_t surface);
 
 #ifdef __cplusplus
 }

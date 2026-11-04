@@ -2963,12 +2963,8 @@ static void dd03(RECVX_ENEMY_WORK* w)
                 recvx_en03_owp_flag_or(w, (uint32_t)BrokenParts[i], 0x3u);
                 recvx_en03_owp_flag_or(w, (uint32_t)BrokenParts[i] + 1u, 0x2u);
                 recvx_en03_owp_flag_or(w, (uint32_t)BrokenParts[i] + 2u, 0x2u);
-                if (s->legs[i]) recvx_en03s_leg_mark(s->legs[i]);
+                if (s->legs[i]) recvx_en03s_leg_mark(s->legs[i], s->h.surface); /* :4588-4592 Kind mode0/2/3, ct0 */
                 s->broken[i] = 1;
-                /* ORIGINAL-FIX (QUALITY.md): en03.c:4592 EXP0_INT(i, 980) = EXP0_C(105)
-                   schreibt 768 Byte hinter den 212-Byte-Block des Kindes
-                   (bhEne_CallocWork(0xD4, 8), macros.h:83) in fremden Heap.
-                   Kein Leser im Original. Regel 2: der Schreibzugriff entfaellt. */
             }
         }
         w->mdflg |= 0x20u;
@@ -3881,10 +3877,7 @@ static void damage_init(RECVX_ENEMY_WORK* w)
                     recvx_en03_owp_flag_or(w, (uint32_t)BrokenParts[pno], 0x3u);
                     recvx_en03_owp_flag_or(w, (uint32_t)BrokenParts[pno] + 1u, 0x2u);
                     recvx_en03_owp_flag_or(w, (uint32_t)BrokenParts[pno] + 2u, 0x2u);
-                    if (s->legs[pno]) recvx_en03s_leg_mark(s->legs[pno]);
-                    /* ORIGINAL-FIX (QUALITY.md): en03.c:6465 EXP0_INT(pno, 980) liegt
-                       768 Byte hinter dem 212-Byte-Block (bhEne_CallocWork(0xD4, 8)) im
-                       fremden Heap; kein Leser im Original. Regel 2: entfaellt. */
+                    if (s->legs[pno]) recvx_en03s_leg_mark(s->legs[pno], s->h.surface); /* :6461-6465 Kind mode0/2/3, ct0 */
                     w->mdflg |= 0x20u;
                     if (w->sv->mince_effect) {
                         w->sv->mince_effect(w, 2, 3);

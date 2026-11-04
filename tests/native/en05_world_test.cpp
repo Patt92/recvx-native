@@ -5,6 +5,7 @@
 #include "world.h"
 #include "room.h"
 #include "en05.h"
+#include "en03_lib.h"
 #include "ninja_math.h"
 #include <cmath>
 #include <cstdlib>
@@ -89,6 +90,26 @@ int main(int argc,char** argv){try{
         int i=0;for(;i<300&&e.mode3<4;++i)f.tick();
         check(e.mode3==4&&e.mtn_no==39,"DD00 corpse state not reached");
         Scene scene;f.world.append(scene,{},SceneCamera{});
+    }
+    {
+        // en05.c:2110-2116 (MV06 Kopfabriss): der Griff setzt plp->hp = -1, loescht EXP1 Bit 0 (kein Blinzeln) und
+        // plp->mlwP->texP = plp->txp[2]. BR00 waehlt MV06 bei plp->hp < crit_hp (en05.c:BR00, kubikari) mit
+        // Zufallsfilter nach Gegner-HP; Vorbedingung (Diagnose): Spieler-HP knapp ueber 0, Gegner-HP < 30, MV06 direkt.
+        bool killed=false;
+        for(float dist:{4.f,5.f,6.f,7.f,8.f}){
+        Fixture f(data);f.tick();f.inv.hp=10;auto& e=f.enemy(0);
+        check(f.world.player_texture_set()==0,"bhSetPlayer txp[0] at start");
+        f.world.deactivate_enemy(1); // Diagnose: der Partner darf den Spieler nicht vorher mit einem Hieb toeten
+        const float px=f.actor.position.x,pz=f.actor.position.z;
+        e.px=px;e.pz=pz+dist;e.py=f.actor.position.y;e.ay=std::int16_t(recvx_t3_arc_tan2(e.px-px,e.pz-pz));
+        e.mode0=1;e.mode1=0;e.mode2=6;e.mode3=0;
+        for(int i=0;i<200&&f.world.player_texture_set()!=2;++i)f.tick();
+        if(f.inv.hp>=0)continue;
+        check(f.world.player_texture_set()==2,"MV06 must switch plp texP to txp[2]");
+        check(!(f.head&1u),"MV06 must clear EXP1 bit 0 (blinking off)");
+        for(const auto& gap:f.world.unbound_enemy_routines())check(gap.find("txp[2]")==std::string::npos,"txp[2] still reported");
+        std::cout<<"  EN05 MV06 Kopfabriss bei Abstand "<<dist<<": txp[2]\n";killed=true;break;}
+        check(killed,"MV06 headcut did not reach the player at any distance");
     }
     std::cout<<"EN05 Init, partner, child, hunt and DD00 PASS\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

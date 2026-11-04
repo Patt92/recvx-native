@@ -16,11 +16,17 @@ struct WeaponChange {bool changed=false;unsigned wpnr_no=0;bool special=false;};
 class Inventory {
 public:
     Inventory();
+    // sub1.c:8440 AllItemInit (system.c:1414, Monitor mn_md0 1 ohne ss_flg 0x200): sys->itm neu, mit
+    // sys->ssd_flg 0x2 (Rangliste A, ranking.c RankingInit) als dritter Platz 0x8010001.
+    void all_item_init(std::uint32_t ssd_flg);
     std::array<std::uint32_t,384> items{};
     unsigned player=0,game_mode=0;
     std::int32_t save_ct=0; // sys->save_ct (mcWriteStartSaveFile 0x271A50 increments it, max 99)
     int hp=160,max_hp=160;
     std::uint32_t play_time=0; // sync.c stv_tm, 60-Hz VSync units, room-independent.
+    // sys->time (SAVEFILE 0x824): vsync_func (ps2_NaSystem.c:104) zaehlt je VSync unter tk_flg 0x80 und
+    // gm_flg 0x80000000 bis 216000000; ranking.c liest es als Spielzeit (GameClearScore, DispTime).
+    std::uint32_t game_time=0;
     bool poisoned=false,side_pack=false,infected=false;
     std::int16_t spray_count=0; // sys->spray_ct, raised by Use_00 for item 20
     // plp->stflg bits held by the inventory: 0x80000 poison, 0x200000 poison2.

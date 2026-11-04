@@ -863,7 +863,9 @@ void RoomWorld::bind_enemy_services(){
         if(pos)e.position={pos->x,pos->y,pos->z};
         if(off){e.has_offset=true;e.offset={off->x,off->y,off->z};}
         unsigned kind=0,index=0;
-        if(link){if(!world->enemy_work_index(link,index)){world->unbound_enemy_.insert("bhSetEffect: Linkwork ohne Raumfigur (Kindwork)");return -1;}kind=2;e.linked_work=link;}
+        // effect.c bhSetEffect: lkwkp ist jedes BH_PWORK, auch ein Kind ohne Raumfigur (ene[]-Platz).
+        if(link){if(world->enemy_work_index(link,index))kind=2;else if(world->enemy_work_slot(link,index))kind=RoomWorld::kEnemySlotLink+1;
+            else{world->unbound_enemy_.insert("bhSetEffect: Linkwork ohne ene[]-Platz");return -1;}e.linked_work=link;}
         return world->spawn_effect(e,kind,index);};
     s.event=recvx_subplayer_enemy_event;
     // zonzon1.c:591 bhEne_SetWeponAtr: capsule from two owP matrices.
@@ -1275,13 +1277,15 @@ void RoomWorld::bind_enemy_services(){
     x.effect_particle=[](RECVX_T3_LINK lk,int joint,const RECVX_ENEMY_VEC* pos,const RECVX_ENEMY_VEC* vec,uint32_t color,int kind)->int{
         auto* world=enemy_world;ParticleLink link;
         if(lk.player){link.linked=true;link.kind=0;link.index=0;link.node=unsigned(joint);}
-        else if(lk.w){unsigned i;if(!world->enemy_work_index(lk.w,i)){world->unbound_enemy_.insert("bhSetEffParticle: Linkwork ohne Raumfigur");return -1;}link.linked=true;link.kind=1;link.index=i;link.node=unsigned(joint);}
+        else if(lk.w){unsigned i;if(world->enemy_work_index(lk.w,i))link.kind=1;else if(world->enemy_work_slot(lk.w,i))link.kind=RoomWorld::kEnemySlotLink;
+            else{world->unbound_enemy_.insert("bhSetEffParticle: Linkwork ohne ene[]-Platz");return -1;}link.linked=true;link.index=i;link.node=unsigned(joint);}
         if(kind<0||kind>=19){world->unbound_enemy_.insert("bhSetEffParticle: typ_no ausserhalb PtclTbl");return -1;}
         return world->particles_.spawn(unsigned(kind),link,{pos->x,pos->y,pos->z},{vec->x,vec->y,vec->z},color);};
     x.effect_particle_mk2=[](RECVX_T3_LINK lk,int joint,const RECVX_ENEMY_VEC* pos,const RECVX_ENEMY_VEC* vec,uint32_t src_col,uint32_t dst_col,int typ_no)->int{
         auto* world=enemy_world;ParticleLink link;
         if(lk.player){link.linked=true;link.kind=0;link.index=0;link.node=unsigned(joint);}
-        else if(lk.w){unsigned i;if(!world->enemy_work_index(lk.w,i)){world->unbound_enemy_.insert("bhSetEffParticleMk2: Linkwork ohne Raumfigur");return -1;}link.linked=true;link.kind=1;link.index=i;link.node=unsigned(joint);}
+        else if(lk.w){unsigned i;if(world->enemy_work_index(lk.w,i))link.kind=1;else if(world->enemy_work_slot(lk.w,i))link.kind=RoomWorld::kEnemySlotLink;
+            else{world->unbound_enemy_.insert("bhSetEffParticleMk2: Linkwork ohne ene[]-Platz");return -1;}link.linked=true;link.index=i;link.node=unsigned(joint);}
         if(typ_no<0||typ_no>=19){world->unbound_enemy_.insert("bhSetEffParticleMk2: typ_no ausserhalb PtclTbl");return -1;}
         return world->particles_.spawn_mk2(unsigned(typ_no),link,{pos->x,pos->y,pos->z},{vec->x,vec->y,vec->z},src_col,dst_col);};
     x.dansa=s.check_dansa;
@@ -1490,6 +1494,11 @@ void RoomWorld::effect_en12_binta(RECVX_ENEMY_WORK* w,int action){
     if(!w||w->id!=12){unbound_enemy_.insert("bhEff_E12_BintaEffControl: lkwkp ist kein EN12-Work");return;}
     recvx_en12_set_fire_binta_effect(w,action);
 }
+bool RoomWorld::enemy_work_slot(const RECVX_ENEMY_WORK* w,unsigned& slot)const{
+    if(!w)return false;
+    for(unsigned i=0;i<enemy_table_.ewk_n&&i<RECVX_ENEMY_SLOTS;++i)if(enemy_table_.slot[i]==w){slot=i;return true;}
+    return false;
+}
 bool RoomWorld::enemy_work_index(const RECVX_ENEMY_WORK* w,unsigned& index)const{
     if(!w)return false;
     for(const auto& pair:entities_)if(pair.first.first==1&&&pair.second.enemy==w){index=pair.first.second;return true;}
@@ -1502,7 +1511,8 @@ int RoomWorld::effect_tb(unsigned flg,int id,int type,unsigned mdlver,NJS_POINT3
     if(ofs){e.has_offset=true;e.offset={ofs->x,ofs->y,ofs->z};}
     unsigned kind=0,index=0;
     if(link_player)kind=1;
-    else if(link_w){if(!enemy_work_index(link_w,index)){unbound_enemy_.insert("bhSetEffectTb: Linkwork ohne Raumfigur (Kindwork)");return -1;}kind=2;e.linked_work=link_w;}
+    else if(link_w){if(enemy_work_index(link_w,index))kind=2;else if(enemy_work_slot(link_w,index))kind=kEnemySlotLink+1;
+        else{unbound_enemy_.insert("bhSetEffectTb: Linkwork ohne ene[]-Platz");return -1;}e.linked_work=link_w;}
     return spawn_effect(e,kind,index);
 }
 const MotionClip* RoomWorld::player_enemy_clip()const{
@@ -2147,8 +2157,8 @@ void RoomWorld::control_enemy_works(){
             NJS_POINT3 q{p->pos.x,p->pos.y,p->pos.z};
             const bool hit=resolve_motion_wall_direct(terrain,actor,q,3.5f,world->player_character_?17.5f:16.5f);
             p->pos={q.x,q.y,q.z};return hit?1:0;};
-        // plp->mlwP->texP = plp->txp[0]: der native Spieler zeichnet stets txp[0].
-        t.player_texture_zero=[](){};
+        // plp->mlwP->texP = plp->txp[0] (en12.c NG00).
+        t.player_texture_zero=[](){enemy_world->player_texture_set_=0;};
         t.player_material=[](uint32_t rgba){enemy_world->player_material_=rgba;};
         t.object_material=[](uint32_t object,uint32_t,uint32_t rgba){auto* world=enemy_world;if(!world->state(2,object)){world->unbound_enemy_.insert("en12 sys->obwp[n] ausserhalb rom->obj_n");return;}
             auto& e=world->entity(2,object);e.enemy_material_set=true;e.enemy_material_color=rgba;};
@@ -2366,8 +2376,10 @@ void RoomWorld::control_enemy_works(){
             if(!ev||index>=ev->interactions.size())return 0;auto& a=ev->interactions[index].attribute;*attr=a;a|=set;a&=~clear;return 1;};
         t.player_owp_clear=[](uint32_t node,uint32_t bits){auto* world=enemy_world;
             if(node>=world->player_owp_flags_.size()){world->unbound_enemy_.insert("EN05 plp->owP[n].flg");return;}world->player_owp_flags_[node]&=~bits;};
-        // plp->txp[2] hat keinen nativen Zeichenbesitzer: benannte Luecke statt Ersatztextur.
-        t.player_texture=[](uint32_t)->int{return 0;};
+        // plp->mlwP->texP = plp->txp[k] (en05.c:1979/2115, k = 2): die Texturliste von mdl[k] des Spielers.
+        t.player_texture=[](uint32_t k)->int{auto* world=enemy_world;
+            if(!world->player_asset_||k>=world->player_asset_->model_count()||world->player_asset_->model_textures(k).empty())return 0;
+            world->player_texture_set_=k;return 1;};
         t.player_poison=[](){if(enemy_world->enemy_attacks_)enemy_world->player_poison_request_=true;}; // Host-Schalter Gegnerangriffe
         t.player_dmlvl=[](int32_t* out)->int{if(!enemy_world->player_dmlvl_bound_)return 0;*out=enemy_world->player_dmlvl_;return 1;};
         t.node_angles=[](RECVX_ENEMY_WORK* w,uint32_t node,int32_t* a,int write)->int{auto& tr=tree_of(owner_of(w));node+=tr.model_window;
@@ -2421,7 +2433,7 @@ void RoomWorld::control_enemy_works(){
             spawn.position=ef.position;spawn.scale=ef.scale;spawn.ax=ef.ax;spawn.ay=ef.ay;spawn.lkono=joint;
             if(ofs){spawn.has_offset=true;spawn.offset={ofs->x,ofs->y,ofs->z};}
             unsigned kind=0,index=0;
-            if(link){if(!world->enemy_work_index(link,index)){world->unbound_enemy_.insert("bhSetEffectTb: Linkwork ohne Raumfigur (en19)");return -1;}kind=2;spawn.linked_work=link;}
+            if(link){if(world->enemy_work_index(link,index))kind=2;else if(world->enemy_work_slot(link,index))kind=RoomWorld::kEnemySlotLink+1;else{world->unbound_enemy_.insert("bhSetEffectTb: Linkwork ohne ene[]-Platz (en19)");return -1;}spawn.linked_work=link;}
             return world->spawn_effect(spawn,kind,index);};
         // effsub3.c:1640 rySetShadow -> bhEff304 (eff[]-Pool, Modifier-Schatten ueber sys->efm[1]).
         t.shadow=[](RECVX_ENEMY_WORK* w,int obj0,int obj1,int obj2,float off_a,float off_b)->int{return enemy_world->ry_set_shadow(w,obj0,obj1,obj2,off_a,off_b);};
@@ -2447,13 +2459,13 @@ void RoomWorld::control_enemy_works(){
         // effsub3.c:2748 rySetEffBlood / :3247 rySetEffBlood2: mtxP = owP[joint].mtx des Links (Spieler
         // kind 0, Gegner kind 1 mit Raumindex), je Pass lebend gelesen.
         t.blood=[](RECVX_T3_LINK lk,int joint,const RECVX_ENEMY_VEC* pos,const RECVX_ENEMY_VEC* dir,int typ)->int{auto* world=enemy_world;
-            unsigned kind=0,index=0;if(lk.w){if(!world->enemy_work_index(lk.w,index)){world->unbound_enemy_.insert("rySetEffBlood: Linkwork ohne Raumfigur");return -1;}kind=1;}
+            unsigned kind=0,index=0;if(lk.w){if(world->enemy_work_index(lk.w,index))kind=1;else if(world->enemy_work_slot(lk.w,index))kind=RoomWorld::kEnemySlotLink;else{world->unbound_enemy_.insert("rySetEffBlood: Linkwork ohne ene[]-Platz");return -1;}}
             const int slot=world->reserve_effect_slot(0);if(slot<0)return -1;
             auto& work=world->sprites_[std::size_t(slot)];work.dynamic=true;work.queued=false;work.scale={1,1,1};
             if(!start_eff309(work.sprite,kind,index,unsigned(joint),{pos->x,pos->y,pos->z},{dir->x,dir->y,dir->z},typ)){work.sprite.flg=0;return -1;}
             work.sprite.slot=slot;world->entity(4,unsigned(slot)).hidden=false;return slot;};
         t.blood2=[](RECVX_T3_LINK lk,int joint,const RECVX_ENEMY_VEC* pos,const RECVX_ENEMY_VEC* dir,int typ)->int{auto* world=enemy_world;
-            unsigned kind=0,index=0;if(lk.w){if(!world->enemy_work_index(lk.w,index)){world->unbound_enemy_.insert("rySetEffBlood2: Linkwork ohne Raumfigur");return -1;}kind=1;}
+            unsigned kind=0,index=0;if(lk.w){if(world->enemy_work_index(lk.w,index))kind=1;else if(world->enemy_work_slot(lk.w,index))kind=RoomWorld::kEnemySlotLink;else{world->unbound_enemy_.insert("rySetEffBlood2: Linkwork ohne ene[]-Platz");return -1;}}
             const int slot=world->reserve_effect_slot(0);if(slot<0)return -1;
             auto& work=world->sprites_[std::size_t(slot)];work.dynamic=true;work.queued=false;work.scale={1,1,1};
             if(!start_eff30b(work.sprite,kind,index,unsigned(joint),{pos->x,pos->y,pos->z},{dir->x,dir->y,dir->z},typ)){work.sprite.flg=0;return -1;}
@@ -2525,7 +2537,7 @@ void RoomWorld::control_enemy_works(){
             spawn.position=ef.position;spawn.scale=ef.scale;spawn.ax=ef.ax;spawn.ay=ef.ay;spawn.lkono=joint;
             if(ofs){spawn.has_offset=true;spawn.offset={ofs->x,ofs->y,ofs->z};}
             unsigned kind=0,index=0;
-            if(link){if(!world->enemy_work_index(link,index)){world->unbound_enemy_.insert("bhSetEffectTb: Linkwork ohne Raumfigur (en26)");return -1;}kind=2;spawn.linked_work=link;}
+            if(link){if(world->enemy_work_index(link,index))kind=2;else if(world->enemy_work_slot(link,index))kind=RoomWorld::kEnemySlotLink+1;else{world->unbound_enemy_.insert("bhSetEffectTb: Linkwork ohne ene[]-Platz (en26)");return -1;}spawn.linked_work=link;}
             return world->spawn_effect(spawn,kind,index);};
         // eff[eno].zn / eff[eno].ct3 (en26.c:840-841, :847-848).
         t.effect_zn_ct3=[](int slot,float zn,int32_t ct3){auto* world=enemy_world;
@@ -2550,7 +2562,7 @@ void RoomWorld::control_enemy_works(){
             if(ofs){spawn.has_offset=true;spawn.offset={ofs->x,ofs->y,ofs->z};}
             if(link_player)return world->spawn_effect(spawn,1,0); // lkwkp = plp (en22.c:2830)
             unsigned index=0;
-            if(link){if(!world->enemy_work_index(link,index)){world->unbound_enemy_.insert("bhSetEffectTb: Linkwork ohne Raumfigur (en22)");return -1;}spawn.linked_work=link;return world->spawn_effect(spawn,2,index);}
+            if(link){unsigned kind=2;if(!world->enemy_work_index(link,index)){if(world->enemy_work_slot(link,index))kind=RoomWorld::kEnemySlotLink+1;else{world->unbound_enemy_.insert("bhSetEffectTb: Linkwork ohne ene[]-Platz (en22)");return -1;}}spawn.linked_work=link;return world->spawn_effect(spawn,kind,index);}
             return world->spawn_effect(spawn);};
         // eff[eno]-Nachfelder (en22.c:2637-2641, :2680-2688, :2814-2816, :2846-2849). TEX vor MODEL:
         // SetDengekiEffect2 setzt txp[0] = mlwP->texP des gewaehlten mdl.
