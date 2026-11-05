@@ -23,7 +23,7 @@ SceneSpawn Player2Progress::enter_room(Player2Mode mode,RoomIdentity destination
             else if(room_name()==target){travel=source==target?travel:"rejoined";}
             else if(source!=target){
                 if(room_name()!=source){move=forced=true;travel="room-limit-teleport";}
-                else if(escort&&life==Player2Life::Active){move=true;travel="door-follow";}
+                else if(life==Player2Life::Active){move=true;travel="door-follow";}
                 else travel="one-room-behind";
             }
         }else if(life==Player2Life::Active){move=true;travel="local-follow";}
@@ -134,8 +134,8 @@ bool RoomWorld::exit_player2_door(){
 }
 
 bool RoomWorld::player2_trade_ready()const{
-    if(!player2_||player2_->mode==Player2Mode::Off||!player2_present()||player2_->progress->life!=Player2Life::Active||player2_->work.hp<=0)return false;
-    if(player2_->driven||(player2_->mode==Player2Mode::Npc&&player2_->work.hp<=1))return false; // includes the pending collapse before its next actor tick
+    if(!player2_||player2_->mode==Player2Mode::Off||!player2_present()||(player2_->progress->life==Player2Life::Dead||player2_->progress->life==Player2Life::Dying)||player2_->work.hp<=0)return false;
+    if(player2_->driven)return false; // Help is available after an enemy releases the partner.
     if(player_health()<=0||player_hidden||player_scripted||event_camera||fixed_camera)return false;
     const auto other=player2_->work.transform.position;
     if(floor_at(player_.position)!=player2_->floor||std::hypot(other.x-player_.position.x,other.z-player_.position.z)>16.f)return false;
@@ -149,7 +149,7 @@ Inventory::TradeResult RoomWorld::trade_player2(Inventory& primary,bool from_par
 }
 
 bool RoomWorld::reload_player2_item(unsigned slot,unsigned game_mode){
-    if(!player2_trade_ready())return false;
+    if(!player2_trade_ready()||player2_->progress->life!=Player2Life::Active||(player2_->mode==Player2Mode::Npc&&player2_->work.hp<=1))return false;
     auto& equipment=player2_->progress->equipment;
     if(slot<2||slot>=equipment.capacity()+2||equipment.slots()[0]!=slot||equipment.weapon()<3)return false;
     // bhSearchBullet / Combi_99 (sub1.c:8862): actual partner ammunition,
@@ -158,7 +158,7 @@ bool RoomWorld::reload_player2_item(unsigned slot,unsigned game_mode){
     return equipment.reload()&&equipment.items!=before;
 }
 bool RoomWorld::equip_player2_item(unsigned slot){
-    if(!player2_trade_ready())return false;
+    if(!player2_trade_ready()||player2_->progress->life!=Player2Life::Active||(player2_->mode==Player2Mode::Npc&&player2_->work.hp<=1))return false;
     auto& equipment=player2_->progress->equipment;
     if(slot<2||slot>=equipment.capacity()+2)return false;
     const auto id=Inventory::id(equipment.slots()[slot]);
@@ -179,6 +179,13 @@ std::optional<ItemUseResult> RoomWorld::use_player2_item(unsigned slot,unsigned 
     const auto result=equipment.use_item(slot,nullptr,control,stage_no_,room_no_,condition);
     equipment.sort(); // SpriteOnOff / ItemSort, the same status-frame follow-up
     p.work.hp=equipment.hp;p.status=(p.status&~0x280000u)|equipment.player_stflg();
+    if(p.mode==Player2Mode::Npc&&p.work.hp>1&&(p.progress->life!=Player2Life::Active||p.collapse_pending)){
+        p.progress->life=Player2Life::Active;p.progress->decision="recovered";p.collapse_pending=false;
+        p.work.inactive=p.work.dead=false;p.presentation&=~1u;p.collision_mode=1;p.pad=p.pad_old=p.pad_full=0;
+        p.combat=std::make_shared<CombatController>(player2_data_,player2_mods_);
+        recvx_player_action_reset(&p.action,p.work.transform.position.x,p.work.transform.position.z,p.work.transform.yaw,0,0,42);
+        player2_motion(42,0,0,4,49152);player2_model();checkpoint_player2();
+    }
     return result;
 }
 
@@ -200,7 +207,12 @@ void RoomWorld::player2_motion(unsigned motion,std::int32_t frame,unsigned mode,
 
 Player2Command RoomWorld::player2_ai(){
     auto& p=*player2_;auto& progress=*p.progress;const auto origin=p.work.transform.position;
-    NpcAiActor actor{p.work.transform,p.floor,p.combat->original_mode(),player_.position,{}};NJS_POINT3 goal{};
+    auto& bag=progress.equipment;
+    if(!p.driven&&p.work.hp>1&&!bag.slots()[0])for(unsigned slot=2;slot<bag.capacity()+2;++slot){const auto id=Inventory::id(bag.slots()[slot]);if(id&&id<156&&(itemdata[id].type&1u)){bag.equip(slot);break;}}
+    if(!p.driven&&p.work.hp>1&&bag.slots()[0]&&bag.weapon()>=3&&!Inventory::quantity(bag.slots()[bag.slots()[0]]))bag.reload();
+    NpcAiActor actor{p.work.transform,p.floor,p.combat->original_mode(),player_.position,{}};
+    actor.reach=bag.weapon()>=3?20.f:-1.f;actor.fire=bag.weapon()==2||(bag.weapon()>=3&&p.combat->locked_target());
+    NJS_POINT3 goal{};
     const bool ordered=p.door_order&&player2_door(*p.door_order,false).has_value();
     if(p.door_order&&!ordered)p.door_order.reset();
     if(ordered){const auto& door=collision_events_->interactions[*p.door_order];goal={door.position.x+door.extent.x*.5f,origin.y,door.position.z+door.extent.z*.5f};
@@ -209,7 +221,7 @@ Player2Command RoomWorld::player2_ai(){
         const float dx=origin.x-goal.x,dz=origin.z-goal.z,length=std::hypot(dx,dz);
         if(length>4.5f){goal.x+=4.5f*dx/length;goal.z+=4.5f*dz/length;}}
     if(ordered)actor.goal=goal;
-    const auto result=npc_ai(actor);progress.decision=result.action;return result.controls;
+    const auto result=npc_ai(actor);if(std::getenv("RECVX_AI_TRACE"))std::fprintf(stderr,"P2AI mode=%u fire=%d yaw=%d action=%s turn=%d aim=%d attack=%d next=%d\n",actor.combat_mode,int(actor.fire),int(actor.actor.yaw),result.action.c_str(),result.controls.turn,int(result.controls.aim),int(result.controls.attack),int(result.controls.next_target));progress.decision=result.action;return result.controls;
 }
 
 NpcAiDecision RoomWorld::npc_ai(const NpcAiActor& actor)const{
@@ -259,7 +271,7 @@ NpcAiDecision RoomWorld::npc_ai(const NpcAiActor& actor)const{
         if(!routed)return {{},"blocked-route",selected};
     }
     const int angle=recvx_subplayer_dir_target(origin.x,origin.z,actor.actor.yaw,goal.x,goal.z,32767);
-    return {{std::abs(angle)<4096?1:0,std::abs(angle)>655?(angle>0?-1:1):0,!hostile&&leader_distance>42.f&&std::abs(angle)<1024},ordered?"approach-door":hostile?"approach-enemy":"follow",selected};
+    return {{std::abs(angle)<4096?1:0,std::abs(angle)>655?(angle>0?-1:1):0,!hostile&&leader_distance>24.f&&std::abs(angle)<1024},ordered?"approach-door":hostile?"approach-enemy":"follow",selected};
 }
 
 bool RoomWorld::damage_player2(int amount){
@@ -390,6 +402,42 @@ int RoomWorld::player2_set_motion_now(int add,const MotionClip*& clip){
     w.commit_pose();w.frame=m.frm_no;p.action.hokan_count=m.hokan_count;p.frm_mode=m.frm_mode;p.mtn_attr=m.mtn_attr;
     player2_model();return r;
 }
+// player.c:6214 bhCPM0_damage for the secondary actor: mode1 0/1 = hit from the front/back, mode2 = strength,
+// motion mode2*2+71+mode1 with bhGetTransZ(mode2*2+11+mode1) and bhAddSpeed(plp,0), flg 0x400000 ends it.
+// The character voice (CallPlayerVoice 1024/1026/1027) and the sys->gm_flg 0x40 bookkeeping of the primary
+// player are not applied to the companion (host rule); everything else follows the original switch.
+void RoomWorld::player2_damage_tick(){
+    auto& p=*player2_;auto& w=p.work;auto& a=p.action;if(!(simulation_flags_&1u))return;
+    const unsigned mode1=(p.collision_mode>>8)&0xffu,mode2=(p.collision_mode>>16)&0xffu,mode3=p.collision_mode>>24;
+    p.system|=4u;w.object_flags|=0x200000u;
+    if(mode1>1u){player2_gaps_.insert("bhCPM0_damage (plp 2): mode1 outside the original switch");p.collision_mode=1;return;}
+    if(mode3==0){
+        w.object_flags|=0x10000u;w.object_flags&=~0x36940000u;p.status&=~0x80u;p.status|=0x10000u;
+        p.head_flags=(p.head_flags&~0x4u)|0x1E0u;
+        const unsigned motion=mode2*2u+71u+mode1;
+        if(!p.asset->has_motion(motion)){player2_gaps_.insert("bhCPM0_damage (plp 2): player motion missing");p.collision_mode=1;return;}
+        w.motion=motion;w.frame=0;a.mtn_no=motion;a.frm_no=0;a.hokan_rate=49152;a.hokan_count=4;p.mtn_add=65536;p.mtn_md=0;
+        a.arp=mode1?1.f+float(mode2):-(1.f+float(mode2));
+        p.collision_mode=(p.collision_mode&0x00ffffffu)|(1u<<24);
+    }else if(mode3==1){
+        if(w.object_flags&0x400000u){
+            w.object_flags&=~0x10004u;p.status&=~0x10000u;p.collision_mode=1;
+            w.motion=42;w.frame=0;recvx_player_action_reset(&a,w.transform.position.x,w.transform.position.z,w.transform.yaw,0,0,42);
+            if(p.asset->has_motion(42)){player2_motion(42,0,0,0,0);player2_model();}
+            return;
+        }
+        const auto curve=mode2*2u+11u+mode1;const auto at=std::size_t(w.frame/65536);
+        try{const auto& trsz=p.asset->translation_curve(curve);
+            if(at<trsz.size()){float sine,cosine;njSinCos(w.transform.yaw&65535,&sine,&cosine);const auto from=w.transform.position;
+                w.transform.position.x-=trsz[at]*sine;w.transform.position.z-=trsz[at]*cosine;resolve_player2_body(from);}
+            else player2_gaps_.insert("bhCPM0_damage (plp 2): frame outside translation curve");
+        }catch(const std::out_of_range&){player2_gaps_.insert("bhCPM0_damage (plp 2): translation curve missing");}
+    }
+    // bhControlPlayer: bhSetMotion after the mode routine, then flg 0x400000 = last frame reached.
+    const MotionClip* clip=nullptr;if(player2_set_motion_now(int(p.mtn_add),clip)==-2)return;
+    const unsigned total=clip->frames;
+    if(total>0){if(unsigned(w.frame/65536)>=total-1u)w.object_flags|=0x400000u;else w.object_flags&=~0x400000u;}
+}
 void RoomWorld::player2_driven_tick(){
     // player.c:1502 bhSetMotion(plp) inside bhControlPlayer while an enemy owns the actor, like control_enemy_player_motion.
     auto& p=*player2_;auto& w=p.work;if(!(simulation_flags_&1u))return;
@@ -455,6 +503,7 @@ void RoomWorld::tick_player2(Player2Command local,bool free_control){
         const unsigned pad=(command.move>0?1u:command.move<0?2u:0u)|(command.turn<0?4u:command.turn>0?8u:0u)|(command.aim?0x100u:0u)|(command.attack?0x10u:0u);
         const unsigned ps=pad&~p.pad_full;p.lever=((ps&0xfu)?0xfu:0u)|((ps&0x110u)?0x100u:0u);p.pad_full=pad;}
     if(p.driven){player2_driven_tick();return;}
+    if((p.collision_mode&0xffu)==2u){player2_damage_tick();return;} /* bhCtrPly_mode0[2] = bhCPM0_damage on the secondary actor */
     if(p.collapse_pending){player2_incapacitate();return;}
     auto& equipment=p.progress->equipment;
     equipment.hp=w.hp;
@@ -472,7 +521,7 @@ void RoomWorld::tick_player2(Player2Command local,bool free_control){
     std::size_t combat_motion=w.motion;std::int64_t combat_frame=w.frame;
     const auto combat_origin=w.transform.position;
     const unsigned old_attacks=p.combat->attacks,old_hits=p.combat->hits;
-    const bool fighting=p.combat->tick({command.aim,command.attack,command.turn,command.move,false},false,equipment,*p.asset,w.transform,combat_motion,combat_frame,this,audio_,collision_events_,&binding);
+    const bool fighting=p.combat->tick({command.aim,command.attack,command.turn,command.move,command.next_target},false,equipment,*p.asset,w.transform,combat_motion,combat_frame,this,audio_,collision_events_,&binding);
     p.progress->attacks+=p.combat->attacks-old_attacks;p.progress->hits+=p.combat->hits-old_hits;
     for(const auto& gap:p.combat->unbound_routines())player2_gaps_.insert(gap);
     w.motion=unsigned(combat_motion);w.frame=combat_frame;
@@ -529,7 +578,7 @@ void RoomWorld::resolve_player2_body(NJS_POINT3 previous){
     resolve_motion_wall(terrain,body,position,previous,3.5f,p.character?17.5f:16.5f);
     if(!hit)p.safe={probe.x,position.y,probe.z};
     check_motion_floor(terrain,body,position,p.safe,p.front_offset,3.5f,p.floor_index);
-    if(p.collision_mode!=1u)player2_gaps_.insert("Player 2 environmental action not bound");
+    if((p.collision_mode&0xffu)!=1u&&(p.collision_mode&0xffu)!=2u)player2_gaps_.insert("Player 2 environmental action not bound");
     // Preserve the shared room data mutations, as the primary native pass does.
     for(std::size_t i=0;i<walls_.size();++i)walls_[i].attributes=geometry[i].attributes;
     if(push_)push_->store_walls(geometry,walls_.size()+enemy_mobile_walls_.size());

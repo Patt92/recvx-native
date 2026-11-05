@@ -41,18 +41,17 @@ selection or closes the window. Inventory or the trade chord closes it too.
 Both controllers can operate the shared cursor; simultaneous commands favour
 Player 1. The world, animation, events and game clock pause during the window.
 
-The partner must be alive and active, on the same floor, within 16 horizontal
+The partner must be alive, on the same floor, within 16 horizontal
 units and without an intervening wall. Doors, scripts, dialogue and other
-screens block entry. Downed/dead partners cannot trade, preserving NPC
-immutability. Each transaction checks these conditions again.
+screens block entry. Downed NPCs can receive items and medicine; dead humans cannot trade. Each transaction checks these conditions again.
 
 The existing native `ItemBoxChange` entry operation supplies item placement,
 stacking, width/capacity and equipped-weapon removal; `ItemSort` settles both
 bags. A transaction journal restores both bags and equipment on refusal.
 Original room restrictions and actor-specific reserved equipment remain in
 force. Story flags, files and crate contents are not exchanged or copied.
-Trading an equipped weapon holsters it; received weapons are not automatically
-equipped. Select a weapon or medicine in the **partner pane**, press **Aim**
+Trading an equipped weapon holsters it; an unarmed NPC automatically equips a received weapon when simulation resumes.
+Human partners retain manual equipment selection. Select a weapon or medicine in the **partner pane**, press **Aim**
 (default R / R1/RB), and confirm **EQUIP**, **UNEQUIP** or **USE**. Cancel/Back
 closes this action menu without a mutation. An equipped firearm also offers
 **RELOAD**: the original `bhSearchBullet` / `Combi_99` compatibility and magazine
@@ -69,9 +68,9 @@ Reloading uses the same existing inventory owner, including equipped-slot
 correction if a consumed ammo entry is removed by sorting. Original
 healing amounts, caps, consumption and refusal messages remain in effect.
 No primary inventory, floor trigger or story-event flags are passed to these
-actions. The partner must remain nearby, active and outside an enemy takeover.
-An NPC at 1 HP is blocked even before the pending collapse tick; this is not a
-revival mechanism. A living human at 1 HP can heal, a dead human cannot.
+actions. The partner must remain nearby and outside an enemy takeover.
+Using medicine that raises NPC HP above 1 restores its active state; invalid
+medicine and cancellation leave it incapacitated. A living human at 1 HP can heal, a dead human cannot.
 
 NPC recipients accept weapons, reload ammunition with a combination table,
 medicine and ink ribbons. Key/file/utility items are refused in either swap
@@ -101,7 +100,7 @@ aim, attack). With no custom driver, the built-in companion follows and fights.
 
 The following are explicitly new host rules requested by the user, not claims
 about original game AI. The companion follows Player 1 with a 14-unit stopping
-distance and runs beyond 42 units. It engages the nearest visible, living,
+distance and runs beyond 24 units. It engages the nearest visible, living,
 damage-enabled enemy on its floor within a 48-unit leader leash. Friendly
 subplayers and invulnerable entry/death states are excluded. The original room
 route table supplies intermediate destinations when direct body passage is
@@ -118,7 +117,9 @@ knife state machine, pose, hit capsule, damage tables and real room enemy works.
 It starts a new swing in native ready mode 65 and releases attack during the
 swing. There is no proximity damage or independent hit timer. Human Player 2
 uses that same combat path. Linked firearm effects and secondary camera modes
-remain open; the supplied equipment is deliberately limited to the knife.
+remain open. The initial weapon is a knife; supplied firearms use the partner's
+own lock table, target cycling and ammunition. Empty magazines use the native
+reload operation on the partner bag.
 
 **The NPC never picks up items.** No companion command can invoke interaction,
 pickup, item granting or story tasks. This includes all key items; supplies may
@@ -130,7 +131,9 @@ further damage stop immediately. Original pickup motion 45 runs to its lowest
 head key (selected from the actual asset's integer keys), then the committed
 crouch pose is held. The resulting `Downed` state is immutable: damage, local
 input, NPC-driver changes, mode changes and diagnostic placement cannot move,
-heal, resume or kill it. The user-authorized room tether below may transport
+resume or kill it. Explicit healing through the exchange window is the user-authorized
+exception: transfer medicine, select it on the partner side, Aim, USE.
+The user-authorized room tether below may transport
 its root position across rooms while preserving 1 HP, life state, exact local
 pose and committed animation frame. This does not heal or revive it.
 
@@ -153,9 +156,14 @@ EN01 `PlayerLink` and `bhSetMotion(plp)` operate on the Player-2 fields
 the grabbing enemy's motion library like Player 1 (`player2_set_motion_now`),
 HP loss and poison bits go to the companion's equipment, the NPC floor stays at
 1 HP (the crouch starts after release), a human Player 2 killed in an
-enemy-driven death (`mode0` 6 with `flg` 0x2) is dead. Open: EN14 (dog) player
-collision parts and the EN09 PlayerLink refuse Player 2 and report a gap;
-Player 2 keeps no `nlxb` trace (its root stands in). The companion pass keeps
+enemy-driven death (`mode0` 6 with `flg` 0x2) is dead. The damage reaction
+`bhCPM0_damage` (`mode0` 2: hit from the front/back, motion 71+/72+, the
+translation curve and flg 0x400000) runs on the secondary actor too, without
+the primary's voice call and `gm_flg` bookkeeping. EN04 (dog) collision parts
+and the EN09 PlayerLink operate on the targeted actor's tree. Dormant or
+scripted works (`type` != 0) keep the primary view, so original wake-up
+triggers still answer to Player 1. Player 2 keeps no `nlxb` trace (its root
+stands in). The companion pass keeps
 running while Player 1 is enemy-driven (grab/throw/death), so a grabbed Player
 2 or a fighting NPC is not frozen by Player 1's grab. The central `damage_player2` rule remains
 authoritative for host damage sources.
@@ -204,9 +212,9 @@ with `--player2`. The NPC rejoins the loaded player at the saved entry position.
 
 These are explicit host companion rules, not original multiplayer behaviour:
 
-- At a regular physical door, an active NPC follows immediately if it is on
-  the player's floor, within 16 units and without a wall between them. Otherwise
-  it may stay in the source room. Incapacitated NPCs can stay one room behind too.
+- At a regular physical door, an active NPC in the source room follows to the actual
+  destination door entry, regardless of its distance from the player.
+  Incapacitated NPCs can stay one room behind.
 - Returning to that resident room restores the stored location. Moving on to a
   second room, or taking a different branch while the NPC is elsewhere, brings
   it to the new player's actual entry position. It cannot fall two rooms behind.
@@ -300,3 +308,8 @@ reloads, corpse exclusion and no primary/story writes on independent visits.
 Replay `player2_door <etc index>` issues the same order as the developer menu.
 
 Partner reload validation: `player2_trade` checks cancellation, no-ammo/full-magazine refusal, an 18-round handgun cap and conservation (17 + 25 becomes 18 + 24). `tools/verify_trade.py` transfers a handgun and ammunition through the real exchange UI, reloads 1 + 25 to 18 + 8, and fires after closing it. Rendered evidence: `build/validation/partner-reload-final/`.
+
+Companion assistance checks: `build/validation/npc-help/` covers physical
+Shift+Tab while downed, medicine recovery, automatic firearm equipment/firing,
+and active door following from beyond the old proximity gate. Inactive actors
+remain protected until an explicit medicine action; human death is unchanged.

@@ -57,6 +57,10 @@ def main():
     assert healing_popup['trade_actions'] and healing_popup['player2']['hp'] == 60
     assert healed['player2']['hp'] == 110 and all(v >> 16 != 21 for v in healed['player2']['items'][2:])
     assert healed['hp'] == healing_popup['hp'] and healed['items'] == healing_popup['items']
+    revived = run('partner-revived', healing.replace('player2_damage 100','player2_damage 99999') + '11 confirm\n12 inventory\n', frames=45)
+    assert revived['player2']['hp']==51 and revived['player2']['life']==0 and not revived['trade_open']
+    helped_physical = run('downed-shift-tab', '0 player2_damage 99999\n5 sdl_key down Left Shift\n6 sdl_key down Tab\n7 sdl_key up Tab\n8 sdl_key up Left Shift\n', frames=60, sdl=True)
+    assert helped_physical['trade_open'] and helped_physical['player2']['hp']==1
     physical_actions = '5 trade\n6 left\n7 left\n8 sdl_key down R\n9 sdl_key up R\n'
     physical_popup = run('partner-physical-actions', physical_actions, frames=60, sdl=True)
     assert physical_popup['trade_actions'], 'configured physical Aim did not open partner actions'
@@ -66,6 +70,9 @@ def main():
              '0 debug_key F2\n1 debug_select give_count 18\n2 confirm\n3 debug_select give 5\n4 confirm\n5 debug_key F2\n'
              '10 trade\n11 right\n12 confirm\n13 confirm\n14 trade_actions\n15 confirm\n16 trade\n'
              '17 player2_keys aim\n40 player2_keys aim attack\n41 player2_keys aim\n70 player2_keys aim attack\n71 player2_keys aim\n')
+    autonomous = armed.split('17 player2_keys')[0].replace('14 trade_actions\n15 confirm\n','')
+    npc_fired = run('npc-auto-firearm', autonomous, frames=160, extra=('--enemy-ai','on','--enemy-grab','off','--enemy-attacks','off'))
+    assert npc_fired['player2']['items'][0] and npc_fired['player2']['attacks']>0, npc_fired['player2']
     fired = run('partner-equipped-firearm', armed, frames=100, mode='local', extra=('--enemy-ai','on','--enemy-grab','off','--enemy-attacks','off'))
     assert fired['player2']['items'][0] == 2 and fired['player2']['items'][2] >> 16 == 5
     assert (fired['player2']['items'][2] & 65535) < 18 and fired['player2']['attacks'] > 0, 'equipped partner weapon did not reach native firing/ammo owner'
@@ -127,10 +134,11 @@ def main():
     for name, prefix, mode in (
         ('absent', '', 'off'),
         ('distant', '0 player2_position 1000 0 1000 0\n', 'local'),
-        ('downed', '0 player2_damage 99999\n', 'npc'),
     ):
         unavailable = run(name, prefix + '5 trade\n', mode=mode)
         assert not unavailable['trade_open'] and not unavailable['inventory_open'], name
+    helped = run('downed-help', '0 player2_damage 99999\n5 trade\n')
+    assert helped['trade_open'] and helped['player2']['hp']==1
     status = run('status-owner', '5 trade\n', extra=('--inventory',))
     assert status['inventory_open'] and not status['trade_open']
 

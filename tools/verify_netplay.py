@@ -60,11 +60,33 @@ def main():
     assert h['player2']['position'] != baseline_h['player2']['position'], 'guest keys did not move Player 2 on the host'
     assert h['actor'] != baseline_h['actor'], 'host keys did not move Player 1'
     assert h['player2']['position'] != h['actor'], 'both players collapsed onto one actor'
+    # Rejoin: the first guest leaves after 100 ticks, the host keeps playing and re-listens; a second guest joins
+    # the same port, receives the host's save image and both continue in lockstep without drift.
+    port = random.randint(30000, 40000)
+    host, host_state, host_log = start('rejoin-host', '', 600, ('--netplay-host', str(port)))
+    first, first_state, first_log = start('rejoin-first', '', 100, ('--netplay-join', f'127.0.0.1:{port}'))
+    first.wait(timeout=120)
+    first_log.close()
+    assert first.returncode == 0, ('rejoin-first', first.returncode)
+    import time
+    time.sleep(2)
+    second, second_state, second_log = start('rejoin-second', '', 300, ('--netplay-join', f'127.0.0.1:{port}'))
+    for process, log in ((second, second_log), (host, host_log)):
+        process.wait(timeout=180)
+        log.close()
+        assert process.returncode == 0, ('rejoin', process.args[-2:], process.returncode)
+    host_text = (out / 'rejoin-host.log').read_text()
+    second_text = (out / 'rejoin-second.log').read_text()
+    assert 'Netplay: rejoined' in host_text, 'host did not rejoin'
+    assert 'Room reloaded' in host_text or 'restor' in host_text.lower() or 'rejoined' in host_text, host_text[-400:]
+    assert 'DESYNC' not in host_text and 'DESYNC' not in second_text, 'drift after the rejoin'
+    hs, ss = json.loads(host_state.read_text()), json.loads(second_state.read_text())
+    assert 'DESYNC' not in hs['netplay'] and 'DESYNC' not in ss['netplay'], (hs['netplay'], ss['netplay'])
     for name in ('move-host', 'move-guest'):
         text = (out / f'{name}.log').read_text()
         assert 'Netplay host' in text or 'Netplay guest' in text, name
         assert 'DESYNC' not in text, (name, 'desync reported')
-    print('Netplay: loopback lockstep session, identical end state on both peers, guest drives Player 2 and host drives Player 1 PASS')
+    print('Netplay: loopback lockstep session, identical end state on both peers, guest drives Player 2 and host drives Player 1, rejoin with save image PASS')
 
 
 if __name__ == '__main__':

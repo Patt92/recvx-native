@@ -97,6 +97,11 @@ def main():
     single = run('save-1p', 'off', '0 debug_key F2\n0 debug_select snapshot_save 1\n0 confirm\n', frames=3, extra=('--snapshots', str(snaps)))
     back = run('load-1p', 'npc', '0 debug_key F2\n0 debug_select snapshot_load 1\n0 confirm\n2 debug_key F2\n', frames=6, extra=('--snapshots', str(snaps)))
     assert back['player2']['mode'] == 'off', ('single-player save kept the companion on', back['player2'])
+    # EN04 dogs (RM_1000): Player 1 at the spawn wakes dog 1 through its trigger area, the dog then jumps the nearer
+    # Player 2 on open ground; bhCPM0_damage runs on the secondary actor (hit reaction, no gap), Player 1 untouched.
+    dog = run('dog-jump', 'local', '0 player2_position 120 0 80 0\n', frames=500, extra=bite_options, room='RM_1000.RDX')
+    assert dog['player2']['hp'] < 160 and dog['hp'] == 160, ('dog did not hit Player 2 only', dog['player2']['hp'], dog['hp'])
+    assert not any('environmental' in g or 'EN14' in g for g in dog['player2']['gaps']), dog['player2']['gaps']
     # Player AI (host auto-fight for Player 1): the same decision drives Player 1 through the real
     # combat controller and knife state machine; the debug menu equips the knife (diagnostic setup).
     ai_script = '0 position -17 0 33.15 8192\n0 debug_key F2\n1 debug_select equip 8\n2 confirm\n4 debug_key F2\n'
@@ -115,7 +120,7 @@ def main():
     (out / 'view.bmp').unlink(missing_ok=True)
     run('view', 'local', '0 player2_keys right\n20 player2_keys forward\n40 player2_keys none\n',
         frames=40, extra=('--screenshot', str(out / 'view.bmp')))
-    print('Player 2 runtime: follow, real enemy knife damage, immutable 1-HP crouch, mortal local player, menu hold, mode switches, Player AI auto-fight/yield, enemy bite binding and two-player save files PASS')
+    print('Player 2 runtime: follow, real enemy knife damage, immutable 1-HP crouch, mortal local player, menu hold, mode switches, Player AI auto-fight/yield, enemy bite binding, dog jump reaction and two-player save files PASS')
 
 
 if __name__ == '__main__':

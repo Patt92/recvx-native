@@ -1,12 +1,14 @@
 // Host-Mod Breitbild (widescreen.h): anamorphe Projektion wie der GameCube-Patch (BHD_ASPECT_X 1.174 *
 // 0.75). Geprueft werden njProjectScreen (NaViewScreenMatrix), das Hauptbild von SoftwareRenderer::draw
-// und dass ausgeschaltet die Originalwerte unveraendert bleiben.
+// und dass ausgeschaltet die Originalwerte unveraendert bleiben. Die CAM_WRK-Versteckmasken (cut.c:620/641)
+// gelten fuer 4:3: im Breitbild bleiben nur Objekte sichtbar, die ganz im erweiterten Streifen liegen.
 #include "ninja_math.h"
 #include "ninja_matrix.h"
 #include "renderer.h"
 #include "widescreen.h"
 #include <cmath>
 #include <iostream>
+#include <vector>
 using namespace recvx;
 static int failures=0;
 static void check(bool ok,const char* what){if(!ok){std::cerr<<"widescreen: "<<what<<'\n';++failures;}}
@@ -21,6 +23,20 @@ static float drawn_column(float x){
     double sum=0;unsigned count=0;
     for(int y=0;y<480;++y)for(int c=0;c<640;++c)if(image.pixels()[std::size_t(y)*640+c]!=scene.background){sum+=c+0.5;++count;}
     return count?float(sum/count):-1.0f;
+}
+// Bildpunkte eines per Kameramaske versteckten Objekts 5, dessen Dreiecke bei den x-Werten liegen.
+static unsigned hidden_object_pixels(std::initializer_list<float> xs,std::vector<unsigned>* revealed=nullptr){
+    Scene scene;scene.background=0xff000000;
+    for(float x:xs){
+        SceneTriangle t;t.color=0xffffffff;t.camera_mask=true;t.object=5;
+        t.vertices[0].position={x-1.0f,-1.0f,-100.0f};t.vertices[1].position={x+1.0f,-1.0f,-100.0f};t.vertices[2].position={x,1.0f,-100.0f};
+        scene.triangles.push_back(t);
+    }
+    SceneCamera camera;camera.clip_near=1.0f;camera.clip_far=1000.0f;camera.hidden_objects[0]=0x80000000u>>5;
+    if(revealed)*revealed=widescreen_revealed_objects(scene,camera);
+    SoftwareRenderer image(640,480);image.set_supersampling(1);image.draw(scene,camera);
+    unsigned count=0;for(auto c:image.pixels())count+=c!=scene.background;
+    return count;
 }
 int main(){
     _Make_SinTable();
@@ -43,7 +59,17 @@ int main(){
     check(std::fabs((c169-320.0f)-(c43-320.0f)*0.75f)<1.5f,"16:9 column must be 3/4 of the 4:3 offset");
     check(edge43<0.0f&&edge169>560.0f&&edge169<620.0f,"geometry right of the 4:3 edge must become visible in 16:9");
     check(drawn_column(20.0f)==c43,"switching off restores the original image");
+    // 4:3-Rand bei z 100: x = 100*tan(pi/8)/1.174 = 35.3; der 16:9-Streifen reicht bis 47.
+    std::vector<unsigned> revealed;
+    check(hidden_object_pixels({40.0f},&revealed)==0&&revealed.empty(),"4:3: hide mask stays untouched");
+    recvx_set_widescreen(1);
+    check(hidden_object_pixels({40.0f},&revealed)>0&&revealed==std::vector<unsigned>{5},"16:9: hidden object entirely in the extra strip becomes visible");
+    check(hidden_object_pixels({-40.0f})>0,"16:9: left strip as well");
+    check(hidden_object_pixels({35.3f},&revealed)==0&&revealed.empty(),"16:9: object crossing the 4:3 edge stays hidden");
+    check(hidden_object_pixels({20.0f})==0,"16:9: object inside the 4:3 image stays hidden");
+    check(hidden_object_pixels({40.0f,-40.0f},&revealed)==0&&revealed.empty(),"16:9: object spanning both strips stays hidden");
+    recvx_set_widescreen(0);
     if(failures)return 1;
-    std::cout<<"widescreen mod: projection, main image and reset passed\n";
+    std::cout<<"widescreen mod: projection, main image, strip hide masks and reset passed\n";
     return 0;
 }

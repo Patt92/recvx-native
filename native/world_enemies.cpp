@@ -1355,7 +1355,7 @@ void RoomWorld::bind_enemy_services(){
     x.ene_count=s.enemy_count;x.ene_at=s.enemy_at;
     x.ene_is_player=[](uint32_t)->int{return 0;}; // the player is no RECVX_ENEMY_WORK in the native table
     x.player_body=[](RECVX_T3_PLAYER_BODY* out)->int{RECVX_ENEMY_PLAYER pl;if(!enemy_world->enemy_player_get(pl))return 0;out->pos=pl.pos;out->aio={0,0,0};out->car=pl.car;out->flg=pl.flg;out->stflg=pl.stflg;return 1;};
-    x.player_stflg_or=[](uint32_t bits){auto* world=enemy_world;if(world->collision_events_)world->collision_events_->flags[14][0]|=bits;else world->collision_status_|=bits;};
+    x.player_stflg_or=[](uint32_t bits){auto* world=enemy_world;if(world->enemy_target_==1u&&world->player2_){world->player2_->status|=bits;return;}if(world->collision_events_)world->collision_events_->flags[14][0]|=bits;else world->collision_status_|=bits;};
     // --- EN01: the zonzon/effect helpers it reaches through its own contract ---
     en.calc_damage=[](RECVX_ENEMY_WORK* w,const RECVX_EN01_COMBWEP* wep,const RECVX_EN01_COMBJOINT* joint){recvx_t3_calc_damage(w,reinterpret_cast<const RECVX_T3_COMBWEP*>(wep),reinterpret_cast<const RECVX_T3_COMBJOINT*>(joint));};
     en.set_blood=[](RECVX_ENEMY_WORK* w,uint8_t type,const RECVX_EN01_BT* bt){recvx_t3_set_blood(w,type,reinterpret_cast<const RECVX_T3_BT*>(bt));};

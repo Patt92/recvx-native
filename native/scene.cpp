@@ -1,4 +1,7 @@
+#include <cmath>
+#include <map>
 #include "scene.h"
+#include "widescreen.h"
 #include "asset_io.h"
 #include "chunk_blend.h"
 #include "binary_view.h"
@@ -421,19 +424,50 @@ void Scene::erase_triangles(const std::function<bool(const SceneTriangle&)>& pre
     for(auto& w:ambient_writes)w.triangle=positions.at(w.triangle);
     triangles.resize(kept);
 }
-NJS_POINT3 Scene::resolve_ambient_material(NJS_POINT3 initial,const SceneCamera* camera){
+NJS_POINT3 Scene::resolve_ambient_material(NJS_POINT3 initial,const SceneCamera* camera,const std::vector<unsigned>* revealed){
     struct Op{unsigned phase;std::size_t triangle,order;const AmbientWrite* write;};
     std::vector<Op> ops;ops.reserve(ambient_writes.size()+triangles.size());
+    const auto shown=[&](unsigned object,unsigned offset){return revealed&&std::binary_search(revealed->begin(),revealed->end(),object+32u*offset);};
     for(std::size_t i=0;i<ambient_writes.size();++i){const auto& w=ambient_writes[i];
-        if(camera&&w.camera_mask&&w.object/32+w.hidden_offset<16&&(camera->hidden_objects[w.object/32+w.hidden_offset]&(0x80000000u>>(w.object%32))))continue; // bhSetHideObject(hidden_offset)
+        if(camera&&w.camera_mask&&w.object/32+w.hidden_offset<16&&(camera->hidden_objects[w.object/32+w.hidden_offset]&(0x80000000u>>(w.object%32)))&&!shown(w.object,w.hidden_offset))continue; // bhSetHideObject(hidden_offset)
         ops.push_back({w.phase,w.triangle,i,&w});}
     for(std::size_t i=0;i<triangles.size();++i)ops.push_back({triangles[i].material_phase,i,ambient_writes.size(),nullptr});
     std::stable_sort(ops.begin(),ops.end(),[](const Op& a,const Op& b){
         if(a.phase!=b.phase)return a.phase<b.phase;
         if(a.triangle!=b.triangle)return a.triangle<b.triangle;
         return a.order<b.order;});
-    for(const auto& op:ops)if(op.write)initial=op.write->color;else triangles[op.triangle].ambient_material=initial;
+    // Breitbildmod: ein nur im 16:9-Streifen gezeigtes Objekt behaelt seine Materialschreiber fuer sich.
+    std::map<unsigned,NJS_POINT3> local;
+    for(const auto& op:ops){
+        if(op.write){if(op.write->camera_mask&&shown(op.write->object,op.write->hidden_offset))local[op.write->object+32u*op.write->hidden_offset]=op.write->color;else initial=op.write->color;continue;}
+        auto& t=triangles[op.triangle];
+        if(t.camera_mask&&shown(t.object,t.hidden_offset)){const auto at=local.find(t.object+32u*t.hidden_offset);t.ambient_material=at!=local.end()?at->second:initial;}
+        else t.ambient_material=initial;}
     return initial;
+}
+std::vector<unsigned> widescreen_revealed_objects(const Scene& scene,const SceneCamera& camera){
+    std::vector<unsigned> out;
+    if(!(recvx_widescreen_scale<1.0f))return out;
+    NJS_MATRIX view;camera_view_matrix(camera,view);
+    NJS_MATRIX mirror_view;std::copy_n(view,16,mirror_view);
+    if(scene.mirror_enabled){NJS_MATRIX m;std::copy_n(scene.mirror_matrix.data(),16,m);njMultiMatrix(&mirror_view,&m);}
+    // 4:3-Projektion des Originals in 640er-Einheiten: x_bild = x * (320 / tan(pers / 2)) * 1.174 / z.
+    const float slope=std::tan(0.0000958738f*float(camera.perspective/2))/1.174f; // |x/z| > slope: jenseits der 4:3-Kante
+    std::map<unsigned,unsigned> sides; // Schluessel -> gemeinsame Seite (1 rechts, 2 links), 0 = nicht ganz draussen
+    for(const auto& t:scene.triangles){
+        if(!t.camera_mask||t.object/32+t.hidden_offset>=16)continue;
+        if(!(camera.hidden_objects[t.object/32+t.hidden_offset]&(0x80000000u>>(t.object%32))))continue;
+        const unsigned key=t.object+32u*t.hidden_offset;auto it=sides.emplace(key,3u).first;if(!it->second)continue;
+        if(t.mirror&&!scene.mirror_enabled){it->second=0;continue;}
+        NJS_MATRIX* m=t.mirror?&mirror_view:&view;
+        for(const auto& v:t.vertices){NJS_POINT3 src=v.position,q;njCalcPoint(m,&src,&q);
+            unsigned side=0;if(q.z>0.f){const float r=q.x/q.z;side=unsigned(r>slope)|unsigned(r<-slope)<<1;}
+            it->second&=side;}}
+    for(const auto& [key,side]:sides)if(side)out.push_back(key);
+    return out;
+}
+std::array<std::uint32_t,16> widescreen_hidden_mask(const std::array<std::uint32_t,16>& hidden,const std::vector<unsigned>& revealed){
+    auto out=hidden;for(const unsigned key:revealed)if(key/32<16)out[key/32]&=~(0x80000000u>>(key%32));return out;
 }
 Scene decode_scene(const std::vector<std::uint8_t>& room) {
     auto scene=Decoder(room).decode();scene.resolve_ambient_material();return scene;

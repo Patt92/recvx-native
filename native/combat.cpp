@@ -204,7 +204,17 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     // Ladeauftrag (system.c:1452/1582/1802), nicht bei jeder plp->wpnr_no-Schreibung.
     if(player_==~0u||inventory.player!=player_||reload){asset_.reset();right_part2_hidden_=false;weapon_models_hidden_=false;
         if(weapon<=20&&!data_.empty()){asset_=WeaponAsset::load(data_,inventory.player,weapon,mods_);if(weapon)player.install_weapon_motions(asset_->motions);}}
-    if(weapon!=weapon_||inventory.player!=player_||reload){original_.reset();weapon_=weapon;player_=inventory.player;}
+    if(weapon!=weapon_||inventory.player!=player_||reload){
+        if(binding){
+            // The host secondary actor retains its own status across menus. A new
+            // combat controller must not inherit the discarded controller's aim state.
+            // bhResetPlayer (player.c:993) restores the inventory status owner;
+            // bhSetWeapon (weapon.c) publishes weapon eligibility to the same work.
+            *binding->status=inventory.player_stflg()|0x40000000u;
+            *binding->flags=(*binding->flags&~0x30000u)|(weapon>1?0x20000u:0u);
+        }
+        original_.reset();weapon_=weapon;player_=inventory.player;
+    }
     const bool supported=weapon_==2||weapon_==3||weapon_==4||weapon_==5||weapon_==6||weapon_==7||weapon_==8||weapon_==9||weapon_==12||weapon_==13||
         weapon_==14||weapon_==15||weapon_==16||weapon_==17|| // Granatwerfer: Abschuss player.c:4990, Geschoss bhEff130
         weapon_==18||weapon_==20|| // Raketenwerfer (bhEff130 type 4), Linear Launcher (type 6, bhEff027 pwksub.c:3126)

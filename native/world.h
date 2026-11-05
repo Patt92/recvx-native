@@ -990,7 +990,7 @@ private:
     unsigned target_character()const{return enemy_target_==1u&&player2_?player2_->character:player_character_;}
     MotionActor target_motion_actor();
     void begin_enemy_pass(RECVX_ENEMY_WORK* w);const MotionClip* player2_enemy_clip()const;int player2_set_motion_now(int add,const MotionClip*& clip);
-    void player2_driven_tick();bool player2_targetable()const;void player2_incapacitate();void player2_apply_hp(int hp);
+    void player2_driven_tick();void player2_damage_tick();bool player2_targetable()const;void player2_incapacitate();void player2_apply_hp(int hp);
     Player2Driver player2_driver_;
     std::set<std::string> player2_gaps_;
     std::filesystem::path player2_data_,player2_mods_;

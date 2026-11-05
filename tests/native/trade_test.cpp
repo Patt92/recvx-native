@@ -80,7 +80,7 @@ static void world_ui(const std::filesystem::path& data){
     check(inventory.contains(8)&&world.player2_progress()->equipment.contains(12),"UI did not exchange the actual owned inventories");
     auto far=player;far.position.x+=100;world.place_player2(far);check(!world.player2_trade_ready()&&world.trade_player2(inventory,false,2,2).code==Inventory::TradeResult::Unavailable,"remote trade bypasses world validation");
     menu.apply({},inventory,world);check(!menu.active(),"partner becoming unavailable leaves stale trade active");world.place_player2(player);
-    world.damage_player2(9999);check(!menu.open(world)&&world.trade_player2(inventory,false,2,2).code==Inventory::TradeResult::Unavailable,"trade mutates incapacitated NPC");
+    world.damage_player2(9999);check(menu.open(world),"help inventory unavailable for incapacitated NPC");
     auto wide=bag();wide.acquire(1,1);wide.acquire(12,15);check(TradeMenu::slot(wide,0)==TradeMenu::slot(wide,1)&&TradeMenu::slot(wide,2)==3,"wide grid maps a half to another packed slot");
     std::cout<<"Trade UI ownership, cancellation, wide grid, proximity and immutable partner PASS\n";
 }
@@ -113,11 +113,13 @@ static void partner_actions(const std::filesystem::path& data){
     check(primary.items==original_primary&&primary.hp==40,"partner actions changed primary ownership");
     progress->equipment.acquire(43,1);const auto protected_items=progress->equipment.items;check(!world.use_player2_item(progress->equipment.search(43),0)&&!world.equip_player2_item(0)&&progress->equipment.items==protected_items,"partner actions reached a key/standard slot");
     world.damage_player2(9999);const auto frozen=progress->equipment.items;const auto pose=world.player2_state()->frame;
-    check(!world.reload_player2_item(3,0)&&!world.equip_player2_item(3)&&!world.use_player2_item(progress->equipment.search(22),0)&&progress->equipment.items==frozen&&world.player2_state()->hp==1&&world.player2_state()->frame==pose,"item action mutated an incapacitated NPC");
-    menu.apply(aim,primary,world);check(!menu.active(),"incapacitated partner kept item actions open");
+    check(!world.reload_player2_item(3,0)&&!world.equip_player2_item(3)&&progress->equipment.items==frozen&&world.player2_state()->hp==1&&world.player2_state()->frame==pose,"item action mutated an incapacitated NPC");
+    menu.apply(aim,primary,world);check(menu.active(),"incapacitated partner cannot receive help");
+    progress->equipment.acquire(21,1);check(world.use_player2_item(progress->equipment.search(21),0).has_value()&&world.player2_state()->hp==51&&progress->life==Player2Life::Active&&!world.player2_state()->inactive,"green herb failed to restore incapacitated NPC");
+    world.tick_player2({},true);check(world.player2_state()->hp==51&&progress->life==Player2Life::Active,"revived NPC collapsed again");
     world.enable_player2(Player2Mode::Local,asset,player,1);world.damage_player2(9999);check(world.player2_state()->hp==0&&!world.equip_player2_item(2)&&!world.use_player2_item(2,0),"dead human partner was revived/mutated");
     auto minimum=std::make_shared<Player2Progress>(1);minimum->equipment.hp=1;minimum->equipment.acquire(21,1);world.enable_player2(Player2Mode::Npc,asset,player,1,minimum);
-    check(!world.player2_trade_ready()&&!world.use_player2_item(minimum->equipment.search(21),0)&&minimum->equipment.hp==1,"1-HP NPC healed before its collapse tick");
+    check(world.player2_trade_ready(),"pending-collapse NPC cannot receive help");
     world.enable_player2(Player2Mode::Local,asset,player,1,minimum);check(world.use_player2_item(minimum->equipment.search(21),0).has_value()&&world.player2_state()->hp==51,"living human at 1 HP inherited NPC incapacity");
     std::cout<<"Partner actions: native equipment toggle, heal/poison/mode/cap/consumption, ownership, cancel and immutable/dead guards PASS\n";
 }

@@ -418,7 +418,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             std::cout<<"Decoded "<<passed<<'/'<<rooms.size()<<" room scenes ("<<triangles<<" triangles, "<<targets<<" active camera targets).\n";
             return passed==rooms.size()?0:1;
         }
-        const auto debug_config=recvx::DebugConfig::read(args.debug_config);recvx::DebugMenu debug(debug_config);bool wireframe=false;bool enemy_ai=args.enemy_ai>=0?args.enemy_ai!=0:(!args.headless&&args.replay.empty());bool enemy_grab=args.enemy_grab>=0?args.enemy_grab!=0:(debug_config.enemy_grab_configured?debug_config.enemy_grab:(!args.headless&&args.replay.empty()));bool enemy_attacks=args.enemy_attacks>=0?args.enemy_attacks!=0:(debug_config.enemy_attacks_configured?debug_config.enemy_attacks:true);bool player_ai=args.player_ai>=0?args.player_ai!=0:!args.control.empty();bool netplay_requested=args.netplay_host>0||!args.netplay_join.empty();std::unique_ptr<recvx::Netplay> netplay;std::string netplay_note;bool netplay_waiting=false;std::chrono::steady_clock::time_point netplay_wait_since{};unsigned sim_tick=0; /* game ticks run in the window loop, for --state */if(netplay_requested){if(args.netplay_host>0&&!args.netplay_join.empty())throw std::runtime_error("--netplay-host and --netplay-join exclude each other");if(args.headless||args.preview||!args.control.empty())throw std::runtime_error("netplay needs the interactive runtime without --control");if(args.player2==recvx::Player2Mode::Off)args.player2=recvx::Player2Mode::Local;}recvx::NpcAiDecision player_ai_decision;bool player_ai_engaged=false; /* Host auto-fight for Player 1 (user request 2026-11-04): the companion's shared decision, default on for AI play (--control). */bool game_over_requested=false,return_title_requested=false;recvx::VibrationUnit vibration; /* sdfunc.c StartVibrationEx / vibman.c / pdVibMx envelopes */
+        const auto debug_config=recvx::DebugConfig::read(args.debug_config);recvx::DebugMenu debug(debug_config);bool wireframe=false;bool enemy_ai=args.enemy_ai>=0?args.enemy_ai!=0:(!args.headless&&args.replay.empty());bool enemy_grab=args.enemy_grab>=0?args.enemy_grab!=0:(debug_config.enemy_grab_configured?debug_config.enemy_grab:(!args.headless&&args.replay.empty()));bool enemy_attacks=args.enemy_attacks>=0?args.enemy_attacks!=0:(debug_config.enemy_attacks_configured?debug_config.enemy_attacks:true);bool player_ai=args.player_ai>=0?args.player_ai!=0:!args.control.empty();bool netplay_requested=args.netplay_host>0||!args.netplay_join.empty();std::unique_ptr<recvx::Netplay> netplay;std::string netplay_note;bool netplay_waiting=false;std::chrono::steady_clock::time_point netplay_wait_since{};struct RejoinJob{std::atomic_bool cancel{false};std::future<std::unique_ptr<recvx::Netplay>> result;~RejoinJob(){cancel=true;if(result.valid())result.wait();}};std::unique_ptr<RejoinJob> rejoin_job;bool netplay_rejoin_host=false,netplay_rejoin_seat=false;std::string netplay_rejoin_address,netplay_rejoin_session;unsigned short netplay_rejoin_port=0;unsigned netplay_base=0;bool netplay_sync_pending=false; /* rejoin after a drop: the host re-listens, the guest reconnects; the host's save image resyncs both (NETPLAY.md) */unsigned sim_tick=0; /* game ticks run in the window loop, for --state */if(netplay_requested){if(args.netplay_host>0&&!args.netplay_join.empty())throw std::runtime_error("--netplay-host and --netplay-join exclude each other");if(args.headless||args.preview||!args.control.empty())throw std::runtime_error("netplay needs the interactive runtime without --control");if(args.player2==recvx::Player2Mode::Off)args.player2=recvx::Player2Mode::Local;}recvx::NpcAiDecision player_ai_decision;bool player_ai_engaged=false; /* Host auto-fight for Player 1 (user request 2026-11-04): the companion's shared decision, default on for AI play (--control). */bool game_over_requested=false,return_title_requested=false;recvx::VibrationUnit vibration; /* sdfunc.c StartVibrationEx / vibman.c / pdVibMx envelopes */
         std::cout<<"Debug config: "<<args.debug_config<<'\n';
         // Eine gemeinsame Pfadauflösung für alle INIs, Snapshots und Spielstände.
         std::cout<<"User data: "<<user_paths.root<<(user_paths.dev?" (dev git tree)":" (release user dir)")<<"; saves: "<<saves_dir<<'\n';
@@ -1018,7 +1018,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         frontend.solo_with_npc=[&]{
             auto asset=load_player2_asset(args.player2_model);
             if(frontend.leave_lobby)frontend.leave_lobby();
-            netplay.reset();netplay_note.clear();netplay_waiting=false;netplay_requested=false;
+            rejoin_job.reset();netplay_rejoin_port=0;netplay_sync_pending=false;netplay.reset();netplay_note.clear();netplay_waiting=false;netplay_requested=false;
             args.player2=recvx::Player2Mode::Npc;player2_asset=std::move(asset);
             player2_progress=std::make_shared<recvx::Player2Progress>((args.player2_model-10)%4);
         };
@@ -1026,7 +1026,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         auto frontend_command=[&](recvx::FrontendCommand command){if(command==recvx::FrontendCommand::Quit)frontend_quit=true;
             if(command==recvx::FrontendCommand::TitleCall)audio.play(13,"ADV",3); // TitleCall: PlayAdx(0,PatId,3)
             if(command==recvx::FrontendCommand::NewGame)first_game_start=true; /* bhSysCallTitle tk_flg 0x300020 -> bhSysCallOpening -> bhFirstGameStart ss_flg |= 0x100 (system.c:402/422) */
-            if(command==recvx::FrontendCommand::NewGame){if(!frontend.multiplayer_start()){if(frontend.leave_lobby)frontend.leave_lobby();netplay.reset();netplay_note.clear();netplay_waiting=false;netplay_requested=false;args.player2=recvx::Player2Mode::Off;player2_asset.reset();player2_progress.reset();}if(player2_asset)player2_progress=std::make_shared<recvx::Player2Progress>((args.player2_model-10)%4);recvx::set_back_color(0u); /* system.c:410 bhSysCallOpening */retry_point.reset();if(events)system_data.ssd_flg=events->flags[16][0];inventory=recvx::Inventory{};inventory.all_item_init(system_data.ssd_flg); /* system.c:1414 AllItemInit mit sys->ssd_flg */combat=recvx::CombatController(args.data,args.mods);events.reset();game_over_requested=false;audio.stop(13); /* Mode -1: StopAdx(0) */load();gameplay_input.set_events(events.get());if(args.camera_explicit){if(args.camera>=scene.cameras.size())throw std::runtime_error("camera index outside room");camera_index=args.camera;camera=scene.cameras[camera_index];}}
+            if(command==recvx::FrontendCommand::NewGame){if(!frontend.multiplayer_start()){if(frontend.leave_lobby)frontend.leave_lobby();rejoin_job.reset();netplay_rejoin_port=0;netplay_sync_pending=false;netplay.reset();netplay_note.clear();netplay_waiting=false;netplay_requested=false;args.player2=recvx::Player2Mode::Off;player2_asset.reset();player2_progress.reset();}if(player2_asset)player2_progress=std::make_shared<recvx::Player2Progress>((args.player2_model-10)%4);recvx::set_back_color(0u); /* system.c:410 bhSysCallOpening */retry_point.reset();if(events)system_data.ssd_flg=events->flags[16][0];inventory=recvx::Inventory{};inventory.all_item_init(system_data.ssd_flg); /* system.c:1414 AllItemInit mit sys->ssd_flg */combat=recvx::CombatController(args.data,args.mods);events.reset();game_over_requested=false;audio.stop(13); /* Mode -1: StopAdx(0) */load();gameplay_input.set_events(events.get());if(args.camera_explicit){if(args.camera>=scene.cameras.size())throw std::runtime_error("camera index outside room");camera_index=args.camera;camera=scene.cameras[camera_index];}}
             if(command==recvx::FrontendCommand::LoadGame){audio.stop(13);load_game_requested=true;} /* system.c:374 -> Schreibmaschinen-Ladebildschirm */};
         auto debug_room=[&](std::size_t destination,unsigned spawn,recvx::Player2RoomChange companion_change=recvx::Player2RoomChange::Event){
             if(destination>=rooms.size())throw std::runtime_error("Raum nicht vorhanden");
@@ -2416,10 +2416,10 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             return session;
         };
         if(netplay_requested){const auto session=netplay_session(args.player2);
-            if(args.netplay_host>0){std::cout<<"Netplay: waiting for a peer on port "<<args.netplay_host<<" ("<<session<<")\n";netplay=recvx::Netplay::host(static_cast<unsigned short>(args.netplay_host),session,args.netplay_delay,args.netplay_timeout);}
+            if(args.netplay_host>0){std::cout<<"Netplay: waiting for a peer on port "<<args.netplay_host<<" ("<<session<<")\n";netplay=recvx::Netplay::host(static_cast<unsigned short>(args.netplay_host),session,args.netplay_delay,args.netplay_timeout);netplay_rejoin_host=true;netplay_rejoin_seat=false;netplay_rejoin_port=static_cast<unsigned short>(args.netplay_host);netplay_rejoin_session=session;}
             else{std::string address=args.netplay_join;unsigned short port=recvx::Netplay::default_port;if(const auto colon=address.rfind(':');colon!=std::string::npos){port=static_cast<unsigned short>(std::stoul(address.substr(colon+1)));address.erase(colon);}
-                std::cout<<"Netplay: connecting to "<<address<<":"<<port<<" ("<<session<<")\n";netplay=recvx::Netplay::join(address,port,session,args.netplay_delay,args.netplay_timeout);}
-            std::cout<<netplay->status()<<'\n';
+                std::cout<<"Netplay: connecting to "<<address<<":"<<port<<" ("<<session<<")\n";netplay=recvx::Netplay::join(address,port,session,args.netplay_delay,args.netplay_timeout);netplay_rejoin_host=false;netplay_rejoin_address=address;netplay_rejoin_port=port;netplay_rejoin_session=session;}
+            std::cout<<netplay->status()<<'\n';netplay_sync_pending=netplay->expect_snapshot();
             if(frontend.active())frontend_command(frontend.lobby_connected());
         }
         // Lockstep drift check: a hash of the state both peers must share after each tick (positions, HP, enemies).
@@ -2538,12 +2538,28 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                 auto asset=load_player2_asset(args.player2_model);
                 const auto session=netplay_session(recvx::Player2Mode::Local);lobby_job=std::make_unique<LobbyJob>();auto* job=lobby_job.get();job->asset=std::move(asset);job->progress=std::make_shared<recvx::Player2Progress>((args.player2_model-10)%4);const auto delay=args.netplay_delay;const auto timeout=args.netplay_timeout;
                 job->result=std::async(std::launch::async,[=]{return host?recvx::Netplay::host(endpoint.second,session,delay,timeout,&job->cancel,player2):recvx::Netplay::join(endpoint.first,endpoint.second,session,delay,timeout,&job->cancel);});
+                netplay_rejoin_host=host;netplay_rejoin_seat=player2;netplay_rejoin_address=endpoint.first;netplay_rejoin_port=endpoint.second;netplay_rejoin_session=session;
                 frontend.lobby_busy=true;frontend.lobby_status=host?"Waiting for guest. Cancel to stop.":"Connecting. Cancel to stop.";
             }catch(const std::exception& error){lobby_job.reset();frontend.lobby_busy=false;frontend.lobby_status=error.what();}
         };
+        auto netplay_drop=[&](const std::string& reason){netplay_note=reason;std::cerr<<reason<<"; continuing locally\n";netplay.reset();netplay_waiting=false;netplay_sync_pending=false;
+            if(!netplay_rejoin_port||rejoin_job)return;
+            rejoin_job=std::make_unique<RejoinJob>();auto* job=rejoin_job.get();const auto session=netplay_rejoin_session;const auto delay=args.netplay_delay;const bool host=netplay_rejoin_host,seat=netplay_rejoin_seat;const auto address=netplay_rejoin_address;const auto port=netplay_rejoin_port;
+            job->result=std::async(std::launch::async,[=]{return host?recvx::Netplay::host(port,session,delay,3600,&job->cancel,seat,true):recvx::Netplay::join(address,port,session,delay,3600,&job->cancel);});
+            netplay_note+=" - reconnecting";};
         while(running){
+            if(rejoin_job&&rejoin_job->result.wait_for(std::chrono::seconds(0))==std::future_status::ready){
+                try{netplay=rejoin_job->result.get();netplay_base=input_tick;netplay_note.clear();netplay_waiting=false;
+                    if(netplay->role()==recvx::Netplay::Role::Host){
+                        if(world&&events&&!frontend.active()){auto snap=recvx::capture_snapshot(inventory,*events,args.player,rooms.name(room_index),{actor.position,actor.yaw,world->floor_at(actor.position),unsigned(args.spawn),camera_index},audio.loaded_room_sound_case());attach_player2(snap);
+                            netplay->send_snapshot(recvx::encode_snapshot(snap));restore_snapshot(snap);netplay_base=input_tick;}
+                    }else netplay_sync_pending=netplay->expect_snapshot();
+                    std::cout<<"Netplay: rejoined ("<<netplay->status()<<")\n";
+                }catch(const std::exception& error){netplay_note=std::string("Netplay rejoin failed: ")+error.what();}
+                rejoin_job.reset();
+            }
             if(lobby_job&&lobby_job->result.wait_for(std::chrono::seconds(0))==std::future_status::ready){
-                try{netplay=lobby_job->result.get();args.player2=recvx::Player2Mode::Local;player2_asset=std::move(lobby_job->asset);player2_progress=std::move(lobby_job->progress);netplay_requested=true;frontend_command(frontend.lobby_connected());replay.erase(replay.begin(),replay.upper_bound(input_tick));input_tick=sim_tick=0;pad_on=pad_ps=pad_on_previous=0;accumulator=0;devices.suppress_held();if(player2_devices)player2_devices->suppress_held();netplay_note.clear();netplay_waiting=false;render_dirty=true;}
+                try{netplay=lobby_job->result.get();netplay_sync_pending=netplay->expect_snapshot();args.player2=recvx::Player2Mode::Local;player2_asset=std::move(lobby_job->asset);player2_progress=std::move(lobby_job->progress);netplay_requested=true;frontend_command(frontend.lobby_connected());replay.erase(replay.begin(),replay.upper_bound(input_tick));input_tick=sim_tick=0;pad_on=pad_ps=pad_on_previous=0;accumulator=0;devices.suppress_held();if(player2_devices)player2_devices->suppress_held();netplay_note.clear();netplay_waiting=false;render_dirty=true;}
                 catch(const std::exception& error){frontend.lobby_status=error.what();frontend.lobby_busy=false;}
                 lobby_job.reset();
             }
@@ -2643,12 +2659,18 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                 if(control.auto_held&&control.autodump_every&&now-control.held_dump>=std::chrono::milliseconds(200)){control.held_dump=now;++control.heartbeat;control_autodump();}
                 if(audio_device&&idle!=control.audio_paused&&!debug.active()){SDL_PauseAudioDevice(audio_device,idle?1:0);control.audio_paused=idle;}}
             while(accumulator>=recvx::game_tick_seconds){
-                if(netplay){ /* lockstep: no tick until the peer's frame for this tick is here; a lost peer ends the session, the game continues locally */
-                    if(input_tick%15u==0u&&input_tick>0)netplay->hash(input_tick,netplay_hash());
-                    if(!netplay->ready(input_tick)){
-                        if(!netplay->connected()){netplay_note=netplay->status();std::cerr<<netplay_note<<"; continuing locally\n";netplay.reset();netplay_waiting=false;}
+                if(netplay&&netplay_sync_pending){ /* rejoined guest: apply the host's save image before the first lockstep tick */
+                    std::vector<std::uint8_t> image;
+                    if(netplay->take_snapshot(image)){try{restore_snapshot(recvx::decode_snapshot(image));}catch(const std::exception& error){netplay_note=std::string("Netplay rejoin sync failed: ")+error.what();}netplay_sync_pending=false;netplay_base=input_tick;}
+                    else if(!netplay->connected()){netplay_drop(netplay->status());break;}
+                    else{accumulator=std::min(accumulator,2*recvx::game_tick_seconds);render_dirty=true;break;}}
+                if(netplay){ /* lockstep: no tick until the peer's frame for this tick is here; a lost peer ends the session, the game continues locally and tries to rejoin */
+                    const unsigned ntick=input_tick-netplay_base;
+                    if(ntick%15u==0u&&ntick>0)netplay->hash(ntick,netplay_hash());
+                    if(!netplay->ready(ntick)){
+                        if(!netplay->connected()){netplay_drop(netplay->status());}
                         else{if(!netplay_waiting)netplay_wait_since=std::chrono::steady_clock::now();accumulator=std::min(accumulator,2*recvx::game_tick_seconds);netplay_waiting=true;render_dirty=true;
-                            if(std::chrono::steady_clock::now()-netplay_wait_since>std::chrono::seconds(30)){netplay_note=netplay->status()+": no frames for 30 s, session dropped";std::cerr<<netplay_note<<"; continuing locally\n";netplay.reset();netplay_waiting=false;}
+                            if(std::chrono::steady_clock::now()-netplay_wait_since>std::chrono::seconds(30))netplay_drop(netplay->status()+": no frames for 30 s, session dropped");
                             break;}}
                     else netplay_waiting=false;}
                 accumulator-=recvx::game_tick_seconds;render_dirty=true;
@@ -2665,9 +2687,9 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                 auto physical=devices.tick();
                 auto physical2=player2_devices?player2_devices->tick():recvx::InputFrame{};
                 if(netplay){ /* the host's frame is Player 1 on both peers, the guest's frame Player 2; own frames apply after the shared delay */
-                    netplay->submit(input_tick,physical);const auto mine=netplay->local(input_tick),theirs=netplay->remote(input_tick);
+                    const unsigned ntick=input_tick-netplay_base;netplay->submit(ntick,physical);const auto mine=netplay->local(ntick),theirs=netplay->remote(ntick);
                     if(netplay->local_player1()){physical=mine;physical2=theirs;}else{physical=theirs;physical2=mine;}
-                    if(input_tick>120)netplay->forget_before(input_tick-120);}
+                    if(ntick>120)netplay->forget_before(ntick-120);}
                 trade_secondary_frame=physical2;
                 vibration.set_unit_present(devices.controllers()>0);{const unsigned level=vibration.tick();if(!netplay||netplay->local_player1())devices.rumble(level*257u,0u,level?50u:0u);}
                 if(ui){if(debug.active()){debug.apply(physical);

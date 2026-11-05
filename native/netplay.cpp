@@ -56,7 +56,7 @@ constexpr int send_flags=0;
 #endif
 constexpr std::uint32_t magic=0x58564352u; // "RCVX"
 constexpr std::uint32_t protocol=3; // 2: four part hashes
-enum Message:std::uint8_t {Input=1,Hash=2,Bye=3};
+enum Message:std::uint8_t {Input=1,Hash=2,Bye=3,SnapshotImage=4};
 void put32(std::vector<std::uint8_t>& out,std::uint32_t v){for(int i=0;i<4;++i)out.push_back(std::uint8_t(v>>(8*i)));}
 void put64(std::vector<std::uint8_t>& out,std::uint64_t v){for(int i=0;i<8;++i)out.push_back(std::uint8_t(v>>(8*i)));}
 std::uint32_t get32(const std::uint8_t* p){std::uint32_t v=0;for(int i=0;i<4;++i)v|=std::uint32_t(p[i])<<(8*i);return v;}
@@ -71,7 +71,8 @@ std::vector<std::uint8_t> recv_exact(Socket s,std::size_t count,std::chrono::ste
         if(n>0){done+=std::size_t(n);continue;}if(n==0)throw std::runtime_error("netplay peer closed during handshake");
         if(would_block()){if((cancelled()||std::chrono::steady_clock::now()>deadline))throw std::runtime_error("netplay handshake timed out");std::this_thread::sleep_for(std::chrono::milliseconds(5));continue;}
         throw std::runtime_error("netplay handshake receive failed");}return out;}
-bool handshake(Socket s,const std::string& session,unsigned delay,double timeout_seconds,bool host,bool player2=false){
+// Returns the seat byte: bit 0 host, bit 1 host plays Player 2, bit 2 a save image follows (rejoin).
+std::uint8_t handshake(Socket s,const std::string& session,unsigned delay,double timeout_seconds,bool host,bool player2=false,bool image=false){
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(long(timeout_seconds*1000));
     std::vector<std::uint8_t> hello;put32(hello,magic);put32(hello,protocol);put32(hello,delay);put32(hello,std::uint32_t(session.size()));hello.insert(hello.end(),session.begin(),session.end());
     send_all(s,hello,deadline);
@@ -82,10 +83,10 @@ bool handshake(Socket s,const std::string& session,unsigned delay,double timeout
     const auto length=get32(head.data()+12);if(length>4096)throw std::runtime_error("netplay session description too long");
     const auto body=recv_exact(s,length,deadline);const std::string theirs(body.begin(),body.end());
     if(theirs!=session)throw std::runtime_error("netplay session differs: peer runs \""+theirs+"\", mine is \""+session+"\"");
-    send_all(s,{std::uint8_t(host?1u|(player2?2u:0u):0u)},deadline);
+    send_all(s,{std::uint8_t(host?1u|(player2?2u:0u)|(image?4u:0u):0u)},deadline);
     const auto seat=recv_exact(s,1,deadline)[0];
-    if(host?seat!=0:(seat!=1&&seat!=3))throw std::runtime_error("netplay: invalid player assignment");
-    return host?player2:(seat&2)!=0;
+    if(host?seat!=0:!(seat&1u))throw std::runtime_error("netplay: invalid player assignment");
+    return host?std::uint8_t(1u|(player2?2u:0u)|(image?4u:0u)):seat;
 }
 Socket make_socket(){ensure_winsock();const Socket s=::socket(AF_INET,SOCK_STREAM,0);if(s==RECVX_INVALID_SOCKET)throw std::runtime_error("netplay: socket() failed");return s;}
 }
@@ -94,7 +95,7 @@ Netplay::Netplay(Role role,std::intptr_t socket,unsigned delay):role_(role),sock
     for(unsigned t=0;t<delay_;++t){local_[t]={};remote_[t]={};}
 }
 Netplay::~Netplay(){if(socket_!=std::intptr_t(RECVX_INVALID_SOCKET)){std::vector<std::uint8_t> bye{Bye};(void)send_bytes(bye);close_socket(Socket(socket_));}}
-std::unique_ptr<Netplay> Netplay::host(unsigned short port,const std::string& session,unsigned delay,double timeout_seconds,const std::atomic_bool* cancel,bool host_player2){
+std::unique_ptr<Netplay> Netplay::host(unsigned short port,const std::string& session,unsigned delay,double timeout_seconds,const std::atomic_bool* cancel,bool host_player2,bool image){
     cancellation=cancel;
     const Socket listener=make_socket();
 #if defined(_WIN32)
@@ -111,7 +112,7 @@ std::unique_ptr<Netplay> Netplay::host(unsigned short port,const std::string& se
     while(peer==RECVX_INVALID_SOCKET){sockaddr_in from{};socklen_t length=sizeof from;peer=::accept(listener,reinterpret_cast<sockaddr*>(&from),&length);
         if(peer==RECVX_INVALID_SOCKET){if((cancelled()||std::chrono::steady_clock::now()>deadline)){close_socket(listener);throw std::runtime_error("netplay: no peer connected within the timeout");}std::this_thread::sleep_for(std::chrono::milliseconds(20));}}
     close_socket(listener);set_nodelay(peer);set_nonblocking(peer);
-    try{handshake(peer,session,delay,timeout_seconds,true,host_player2);}catch(...){close_socket(peer);throw;}
+    try{handshake(peer,session,delay,timeout_seconds,true,host_player2,image);}catch(...){close_socket(peer);throw;}
     auto result=std::unique_ptr<Netplay>(new Netplay(Role::Host,std::intptr_t(peer),delay));result->host_player2_=host_player2;return result;
 }
 std::unique_ptr<Netplay> Netplay::join(const std::string& address,unsigned short port,const std::string& session,unsigned delay,double timeout_seconds,const std::atomic_bool* cancel){
@@ -127,8 +128,8 @@ std::unique_ptr<Netplay> Netplay::join(const std::string& address,unsigned short
         close_socket(s);if((cancelled()||std::chrono::steady_clock::now()>deadline)){freeaddrinfo(found);throw std::runtime_error("netplay: could not connect to "+address+":"+std::to_string(port)+" ("+last+")");}
         std::this_thread::sleep_for(std::chrono::milliseconds(250));}
     freeaddrinfo(found);set_nodelay(peer);set_nonblocking(peer);
-    bool host_player2=false;try{host_player2=handshake(peer,session,delay,timeout_seconds,false);}catch(...){close_socket(peer);throw;}
-    auto result=std::unique_ptr<Netplay>(new Netplay(Role::Guest,std::intptr_t(peer),delay));result->host_player2_=host_player2;return result;
+    std::uint8_t seat=0;try{seat=handshake(peer,session,delay,timeout_seconds,false);}catch(...){close_socket(peer);throw;}
+    auto result=std::unique_ptr<Netplay>(new Netplay(Role::Guest,std::intptr_t(peer),delay));result->host_player2_=(seat&2u)!=0;result->expect_snapshot_=(seat&4u)!=0;return result;
 }
 Netplay::Packed Netplay::pack(const InputFrame& frame){Packed p;p.gamepad=frame.gamepad_input?1:0;
     for(unsigned i=0;i<action_count;++i){if(frame.held[i])p.held|=1u<<i;if(frame.pressed[i])p.pressed|=1u<<i;if(frame.repeat[i])p.repeat|=1u<<i;}return p;}
@@ -165,11 +166,15 @@ void Netplay::pump(){
         if(type==Input){if(inbox_.size()-at<18)break;Packed p;const unsigned tick=get32(&inbox_[at+1]);p.held=get32(&inbox_[at+5]);p.pressed=get32(&inbox_[at+9]);p.repeat=get32(&inbox_[at+13]);p.gamepad=inbox_[at+17];remote_[tick]=p;++received_;at+=18;}
         else if(type==Hash){if(inbox_.size()-at<5+8*parts)break;const unsigned tick=get32(&inbox_[at+1]);std::array<std::uint64_t,parts> value{};for(unsigned i=0;i<parts;++i)value[i]=get64(&inbox_[at+5+8*i]);remote_hash_[tick]=value;
             if(const auto it=local_hash_.find(tick);it!=local_hash_.end()&&it->second!=value&&desync_tick_<0){desync_tick_=long(tick);for(unsigned i=0;i<parts;++i)if(it->second[i]!=value[i])desync_parts_|=1u<<i;}at+=5+8*parts;}
+        else if(type==SnapshotImage){if(inbox_.size()-at<5)break;const auto length=get32(&inbox_[at+1]);if(length>16u*1024u*1024u){fail("snapshot image too large");at=inbox_.size();break;}
+            if(inbox_.size()-at<5+length)break;snapshot_.assign(inbox_.begin()+std::ptrdiff_t(at+5),inbox_.begin()+std::ptrdiff_t(at+5+length));snapshot_ready_=true;at+=5+length;}
         else if(type==Bye){fail("peer left the session");at+=1;break;}
         else{fail("unknown message from peer");at=inbox_.size();break;}}
     inbox_.erase(inbox_.begin(),inbox_.begin()+std::ptrdiff_t(at));
 }
 bool Netplay::ready(unsigned tick){pump();return local_.count(tick)&&remote_.count(tick);}
+void Netplay::send_snapshot(const std::vector<std::uint8_t>& bytes){std::vector<std::uint8_t> out{SnapshotImage};put32(out,std::uint32_t(bytes.size()));out.insert(out.end(),bytes.begin(),bytes.end());(void)send_bytes(out);}
+bool Netplay::take_snapshot(std::vector<std::uint8_t>& out){pump();if(!snapshot_ready_)return false;out=std::move(snapshot_);snapshot_.clear();snapshot_ready_=false;return true;}
 InputFrame Netplay::local(unsigned tick)const{const auto it=local_.find(tick);return it==local_.end()?InputFrame{}:unpack(it->second);}
 InputFrame Netplay::remote(unsigned tick)const{const auto it=remote_.find(tick);return it==remote_.end()?InputFrame{}:unpack(it->second);}
 void Netplay::forget_before(unsigned tick){

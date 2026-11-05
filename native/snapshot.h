@@ -67,4 +67,7 @@ void restore_events(const Snapshot& snapshot,EventVm& events);
 SnapshotPlayer snapshot_player(const Snapshot& snapshot);
 void write_snapshot(const std::filesystem::path& path,const Snapshot& snapshot);
 Snapshot read_snapshot(const std::filesystem::path& path);
+// The same file image in memory (netplay rejoin sends it to the peer).
+std::vector<std::uint8_t> encode_snapshot(const Snapshot& snapshot);
+Snapshot decode_snapshot(std::vector<std::uint8_t> bytes);
 }

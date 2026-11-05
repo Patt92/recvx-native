@@ -18,7 +18,7 @@ class Netplay {
 public:
     enum class Role {Host,Guest};
     // Blocking: listens on `port` until a peer connects (`timeout_seconds`) and completes the handshake.
-    static std::unique_ptr<Netplay> host(unsigned short port,const std::string& session,unsigned delay,double timeout_seconds,const std::atomic_bool* cancel=nullptr,bool host_player2=false);
+    static std::unique_ptr<Netplay> host(unsigned short port,const std::string& session,unsigned delay,double timeout_seconds,const std::atomic_bool* cancel=nullptr,bool host_player2=false,bool image=false);
     // Blocking: connects to host:port and completes the handshake.
     static std::unique_ptr<Netplay> join(const std::string& address,unsigned short port,const std::string& session,unsigned delay,double timeout_seconds,const std::atomic_bool* cancel=nullptr);
     ~Netplay();
@@ -47,6 +47,10 @@ public:
     bool connected()const{return connected_;}
     const std::string& error()const{return error_;}
     std::string status()const;
+    // Rejoin: the host sends its save-file image, the guest applies it before its first lockstep tick.
+    bool expect_snapshot()const{return expect_snapshot_;} // guest: the host announced a save image (rejoin)
+    void send_snapshot(const std::vector<std::uint8_t>& bytes);
+    bool take_snapshot(std::vector<std::uint8_t>& out); // pumps; true once a complete image arrived
     // Drops frames/hashes older than `tick`.
     void forget_before(unsigned tick);
     // Wire helpers (also for tests): 32-bit action masks of an InputFrame.
@@ -58,10 +62,10 @@ private:
     void pump();
     bool send_bytes(const std::vector<std::uint8_t>& bytes);
     void fail(const std::string& why);
-    bool host_player2_=false;Role role_;std::intptr_t socket_;unsigned delay_;
+    bool host_player2_=false,expect_snapshot_=false;Role role_;std::intptr_t socket_;unsigned delay_;
     std::map<unsigned,Packed> local_,remote_;
     std::map<unsigned,std::array<std::uint64_t,parts>> local_hash_,remote_hash_;unsigned desync_parts_=0;
-    std::vector<std::uint8_t> inbox_;
+    std::vector<std::uint8_t> inbox_,snapshot_;bool snapshot_ready_=false;
     bool connected_=true;long desync_tick_=-1;std::string error_;
     unsigned sent_=0,received_=0;
 };

@@ -119,7 +119,7 @@ SnapshotPlayer snapshot_player(const Snapshot& snap){
     const auto& s=snap.save;return {s.ply_pos,Angle(s.ply_ang),s.flr_no,unsigned(std::uint8_t(s.pos_no)),std::size_t(std::uint8_t(s.cut_no))};
 }
 
-void write_snapshot(const std::filesystem::path& path,const Snapshot& snap){
+std::vector<std::uint8_t> encode_snapshot(const Snapshot& snap){
     Writer w;for(char c:magic)w.u8(std::uint8_t(c));w.u32(format);
     const auto save=snap.save.encode();w.u32(std::uint32_t(save.size()));w.out.insert(w.out.end(),save.begin(),save.end());
     const auto& h=snap.host;w.u32(std::uint32_t(h.room.size()));for(char c:h.room)w.u8(std::uint8_t(c));
@@ -129,6 +129,10 @@ void write_snapshot(const std::filesystem::path& path,const Snapshot& snap){
     w.u8(h.two_players); // Format 3: optional host two-player block
     if(h.two_players){w.u8(std::uint8_t(h.player2_mode));w.u8(std::uint8_t(h.player2_model));w.u32(std::uint32_t(h.player2_hp));w.u8(h.player2_poisoned);w.u8(std::uint8_t(h.player2_weapon));w.words(h.player2_items);}
     w.u32(crc32(w.out.data(),w.out.size()));
+    return w.out;
+}
+void write_snapshot(const std::filesystem::path& path,const Snapshot& snap){
+    const Writer w{encode_snapshot(snap)};
     if(path.has_parent_path())std::filesystem::create_directories(path.parent_path());
     auto temporary=path;temporary+=".tmp";
     {std::ofstream file(temporary,std::ios::binary);if(!file)throw std::runtime_error("cannot write snapshot "+temporary.string());
@@ -138,6 +142,9 @@ void write_snapshot(const std::filesystem::path& path,const Snapshot& snap){
 Snapshot read_snapshot(const std::filesystem::path& path){
     std::ifstream file(path,std::ios::binary);if(!file)throw std::runtime_error("snapshot not found: "+path.string());
     std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(file)),std::istreambuf_iterator<char>());
+    return decode_snapshot(bytes);
+}
+Snapshot decode_snapshot(std::vector<std::uint8_t> bytes){
     if(bytes.size()<16||std::memcmp(bytes.data(),magic,8))throw std::runtime_error("not a RECVX snapshot");
     Reader tail{bytes,bytes.size()-4};if(tail.u32()!=crc32(bytes.data(),bytes.size()-4))throw std::runtime_error("snapshot checksum mismatch");
     bytes.resize(bytes.size()-4);Reader r{bytes,8};

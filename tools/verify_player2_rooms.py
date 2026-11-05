@@ -43,11 +43,11 @@ def main():
     first_door = '0 position -36.15 0 49.5252 16384\n5 confirm\n6 confirm\n'
     far = '0 player2_position -10 0 33 0\n' + first_door
     behind = run('one-behind', far, frames=15, picture=True)
-    assert behind['room'] == 'RM_0050.RDX' and behind['player2']['room'] == 'RM_0080.RDX'
-    assert not behind['player2']['present'] and behind['player2']['room_distance'] == 1
+    assert behind['room'] == 'RM_0050.RDX' and behind['player2']['room'] == 'RM_0050.RDX'
+    assert behind['player2']['present'] and behind['player2']['room_distance'] == 0
     assert behind['player2']['teleports'] == 0 and not behind['trade_open']
     held = run('absent-held', far, frames=60)
-    assert held['player2'] == behind['player2'], 'absent NPC simulated in the wrong room'
+    assert held['player2']['present'] and held['player2']['travel']=='door-follow', 'distant NPC did not arrive through the used door'
     near = run('near-escort', first_door, frames=15)
     assert near['player2']['present'] and near['player2']['room'] == near['room']
     assert near['player2']['travel'] == 'door-follow' and near['player2']['teleports'] == 0
@@ -55,10 +55,10 @@ def main():
     caught = run('room-limit', far + second_door, picture=True)
     assert caught['room'] == 'RM_0060.RDX' and caught['player2']['room'] == caught['room']
     assert caught['player2']['present'] and caught['player2']['room_distance'] == 0
-    assert caught['player2']['teleports'] == 1 and caught['player2']['travel'] == 'room-limit-teleport'
+    assert caught['player2']['teleports'] == 0 and caught['player2']['travel'] == 'door-follow'
     returned = run('return', far + '20 position -35 0 49.5252 16384\n25 confirm\n26 confirm\n', frames=27)
     assert returned['room'] == 'RM_0080.RDX' and returned['player2']['present']
-    assert returned['player2']['position'] == behind['player2']['position'] and returned['player2']['teleports'] == 0
+    assert returned['player2']['travel']=='door-follow' and returned['player2']['teleports'] == 0
     human = run('human', far, frames=15, mode='local')
     assert human['player2']['present'] and human['player2']['travel'] == 'local-follow'
 

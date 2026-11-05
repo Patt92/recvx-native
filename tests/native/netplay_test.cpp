@@ -39,6 +39,13 @@ static void lockstep(){
     host->hash(135,{1,5,7,9});guest->hash(135,{2,5,8,9});
     for(int spin=0;spin<2000&&!(host->desynced()&&guest->desynced());++spin){host->ready(121);guest->ready(121);std::this_thread::sleep_for(std::chrono::milliseconds(1));}
     check(host->desynced()&&guest->desynced()&&host->desync_tick()==135&&guest->desync_tick()==135&&host->desync_parts()==0b0101u&&guest->desync_parts()==0b0101u&&host->status().find("player 1/room, enemies")!=std::string::npos,"hash mismatch/parts not detected on both peers");
+    {   // Rejoin: the host's save image travels as one message and arrives whole.
+        std::vector<std::uint8_t> image(70000);for(std::size_t i=0;i<image.size();++i)image[i]=std::uint8_t(i*7+3);
+        host->send_snapshot(image);std::vector<std::uint8_t> got;
+        for(int spin=0;spin<4000&&!guest->take_snapshot(got);++spin)std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        check(got==image,"snapshot image did not arrive intact");
+        check(!guest->take_snapshot(got),"snapshot image delivered twice");
+    }
     host->forget_before(100);check(same(host->local(119),host_sent[117]),"forget_before dropped a kept frame");
     guest.reset();
     for(int spin=0;spin<2000&&host->connected();++spin){host->ready(121);std::this_thread::sleep_for(std::chrono::milliseconds(1));}

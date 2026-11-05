@@ -89,11 +89,14 @@ static void companion(const std::filesystem::path& data){
     auto asset=std::make_shared<PlayerAsset>(PlayerAsset::load(data,11));auto progress=std::make_shared<Player2Progress>(1);
     auto world=std::make_unique<RoomWorld>(bytes,scene,primary,motion,frame,audio,data,std::filesystem::path{},"RM_0080");
     world->enable_player2(Player2Mode::Npc,asset,primary,1,progress);
+    NpcAiActor chase{primary,world->floor_at(primary.position),0u,primary.position,{}};chase.leader->x+=30;chase.actor.yaw=-16384;
+    check(world->npc_ai(chase).controls.run,"NPC does not run at normal following distance");
     primary.position.x+=30;const auto initial=world->player2_state()->transform.position;
     const auto distance=[&]{const auto p=world->player2_state()->transform.position;return std::hypot(primary.position.x-p.x,primary.position.z-p.z);};
     const auto before=distance();for(unsigned i=0;i<90;++i)world->tick_player2({},true);
     check(distance()<before-5.f&&!same(initial,world->player2_state()->transform.position),"built-in follow did not close the distance");
     check(progress->decision=="idle"||progress->decision=="follow","follow selected an unrelated task");
+
     check(world->damage_player2(10)&&world->player2_state()->hp==150,"nonlethal NPC damage is not accounted");
     check(world->damage_player2(2147483647)&&world->player2_state()->hp==1&&progress->life==Player2Life::Collapsing,"NPC lethal damage was not clamped to 1 HP");
     unsigned callbacks=0;world->set_player2_driver([&](const RoomWorld&){++callbacks;return Player2Command{1,1,true,true,true};});
@@ -136,6 +139,9 @@ static void companion(const std::filesystem::path& data){
     for(unsigned i=0;i<120;++i)world->tick_player2({},true);
     check(world->player2_progress()->life==Player2Life::Dead&&world->player2_state()->dead,"human Player 2 cannot die");
     world->set_player2_mode(Player2Mode::Npc);check(world->player2_state()->hp==0&&world->player2_progress()->life==Player2Life::Dead,"NPC switch resurrects a dead local player");
+    auto armed=std::make_shared<Player2Progress>(1);armed->equipment.items.fill(0);armed->equipment.wpnr_no=0;armed->equipment.acquire(5,18);
+    world->enable_player2(Player2Mode::Npc,asset,primary,1,armed);world->tick_player2({},true);
+    check(armed->equipment.weapon()==3,"NPC failed to equip received handgun");
     std::cout<<"NPC follow, 1-HP immutable crouch, no pickups, room persistence and mortal local Player 2 PASS\n";
 }
 static void npc_combat(const std::filesystem::path& data){
@@ -231,7 +237,7 @@ static void enemy_binding(const std::filesystem::path& data){
 static void room_policy(){
     Player2Progress p;const SceneSpawn start{{1,2,3},1234},entry{{20,4,30},5678};
     p.enter_room(Player2Mode::Npc,{0,8,0},start,Player2RoomChange::Reload,true);
-    const auto stock=p.equipment.items;
+    const auto stock=p.equipment.items;p.life=Player2Life::Downed;
     p.enter_room(Player2Mode::Npc,{0,5,0},entry,Player2RoomChange::Door,false);
     check(p.room_name()=="RM_0080.RDX"&&p.room_distance()==1&&same(p.location.position,start.position)&&!p.teleports,"far NPC did not stay exactly one room behind");
     p.enter_room(Player2Mode::Npc,{0,8,0},entry,Player2RoomChange::Door,false);
@@ -248,8 +254,8 @@ static void room_policy(){
     p.enter_room(Player2Mode::Npc,{1,0,1},start,Player2RoomChange::Door,false);
     check(p.room_case==1&&p.teleports==4,"room variant change reused the wrong NPC space");
     check(p.equipment.items==stock&&p.equipment.hp==160,"room policy changed equipment or HP");
-    p.enter_room(Player2Mode::Npc,{1,1,1},entry,Player2RoomChange::Door,true);
-    check(p.room_distance()==0&&p.teleports==4&&p.travel=="door-follow","nearby NPC did not follow a regular door");
+    p.life=Player2Life::Active;p.enter_room(Player2Mode::Npc,{1,1,1},entry,Player2RoomChange::Door,false);
+    check(p.room_distance()==0&&p.teleports==4&&p.travel=="door-follow","active distant NPC did not follow through the used door");
     p.life=Player2Life::Dead;p.equipment.hp=0;
     p.enter_room(Player2Mode::Npc,{2,0,0},start,Player2RoomChange::Event,true);
     check(p.room_name()=="RM_1011.RDX"&&p.equipment.hp==0&&p.life==Player2Life::Dead,"room tether resurrected or transported a mortal corpse");

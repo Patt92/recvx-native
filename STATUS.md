@@ -36,8 +36,19 @@ resampling the held crouch. Independent visits use **NPC door** in the debug
 menu and real door/POS data; off-room records remain dormant. Incoming explosions
 are bound; enemy melee/grabs/bites/poison now target the nearer player through a
 per-pass target switch (`begin_enemy_pass`), EN14/EN09 player links still open.
+NPC catches up running, auto-equips received weapons and follows the used door;
+downed NPC assistance through trade/medicine is enabled (`build/validation/npc-help/`).
 Save files/snapshots format 3 carry an optional two-player block (older files =
-single player); netplay reports the drifting part and drops a silent peer after 30 s. The same companion decision
+single player); netplay reports the drifting part, drops a silent peer after 30 s and
+rejoins with the host's save image ([docs/NETPLAY.md](docs/NETPLAY.md#rejoin-after-a-drop)).
+Enemy binding to Player 2 covers EN04 dog jumps with `bhCPM0_damage` on the
+secondary actor; dormant works (`type` != 0) keep the primary view.
+Known: `tools/verify_enemy_ai.py` `death-1050` expects the FRONT zombie death
+by tick 1050; since a8c958a (mlwP model selection, 2026-10-22) it happens by
+1800 (bisected, same on HEAD). The expectation is a timing snapshot of the
+script's own commit fe6a468 and was not changed; the diagnostic `position`
+teleport now re-commits the player joints (bhFixPosition), which fixed the
+`graveyard-door` scenario. The same companion decision
 drives Player 1 in AI play (**Player AI**, `--player-ai`, default on with
 `--control`): knife or lock-gated firearm input, yielding to control lines and
 the keyboard; the driver's fight reflex defers to it. Debug row **Player 2 model**

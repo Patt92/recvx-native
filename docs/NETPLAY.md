@@ -101,6 +101,19 @@ spent waiting for the peer and the disconnect reason. When the peer leaves, or
 no frame arrives for 30 s, the runtime drops the session and continues alone
 with its local player.
 
+## Rejoin after a drop
+
+After a drop both sides keep playing locally and try to rejoin for up to an
+hour: the host listens again on the same port, the guest reconnects to the same
+address (status line `reconnecting`). Once the handshake succeeds, the host
+captures its save image (the same format-3 snapshot as a typewriter save, with
+the two-player block), sends it over the connection and both sides reload the
+room from it: progress, inventories, flags, Player 2 equipment and the player's
+position come from the host; enemies and effects of the room restart as after
+any load, and the guest's local progress since the drop is discarded. Lockstep
+tick numbering restarts with the new connection. A rejoin on the title screen
+reconnects without an image. SOLO or NEW GAME ends a pending rejoin.
+
 ## Limits (host rules, open)
 
 - Same platform on both sides: the simulation uses the C library `rand()` and
@@ -111,8 +124,8 @@ with its local player.
   refused with netplay. LOAD GAME is disabled during a session.
 - Video/audio settings, the 3rd-person camera mod, rumble (host only) and
   presentation options stay local and do not affect the simulation.
-- There is no NAT traversal, encryption, spectator mode, rejoin after a drop or
-  split screen. The original camera follows Player 1; the guest watches the same
+- There is no NAT traversal, encryption, spectator mode or split screen; a
+  rejoin reloads the room from the host's save image (see above). The original camera follows Player 1; the guest watches the same
   picture.
 - Input over the network reaches the simulation `delay` ticks late for both
   players; the peer's and your own frames are applied at the same tick.

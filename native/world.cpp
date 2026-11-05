@@ -4858,7 +4858,8 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
         for(std::size_t i=shadow_first;i<scene.shadows.size();++i)scene.shadows[i].mirror=true;
     }
     }
-    ambient_material_=scene.resolve_ambient_material(ambient_material_,&effect_camera);
+    {const auto revealed=widescreen_revealed_objects(scene,effect_camera); // Host-Breitbildmod: dieselben Objekte wie der Renderer
+     ambient_material_=scene.resolve_ambient_material(ambient_material_,&effect_camera,&revealed);}
     NJS_MATRIX view;camera_view_matrix(effect_camera,view);
     NJS_MATRIX mirror_rotation;std::copy_n(scene.mirror_matrix.begin(),16,mirror_rotation);
     // Modelle der ef_fnc-Zeichenfunktionen (bhEff30cDrw njCnkEasyMultiDrawModel, bhEff_ModelDraw

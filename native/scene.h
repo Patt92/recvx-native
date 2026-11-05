@@ -226,7 +226,10 @@ struct Scene {
         std::uint8_t hidden_offset=0; // SceneTriangle::hidden_offset der Raumspiegelung
     };
     std::vector<AmbientWrite> ambient_writes; // ordered material writes, also for empty polygon lists
-    NJS_POINT3 resolve_ambient_material(NJS_POINT3 initial={1,1,1},const SceneCamera* camera=nullptr);
+    // revealed: Schluessel (object + 32 * hidden_offset) von Objekten, die der Host-Breitbildmod trotz
+    // CAM_WRK-Versteckmaske zeigt (widescreen_revealed_objects). Ihre Materialschreiber wirken nur auf sie
+    // selbst; der Materialzustand der uebrigen Dreiecke bleibt der des Originals.
+    NJS_POINT3 resolve_ambient_material(NJS_POINT3 initial={1,1,1},const SceneCamera* camera=nullptr,const std::vector<unsigned>* revealed=nullptr);
     void erase_triangles(const std::function<bool(const SceneTriangle&)>& predicate);
     std::vector<SceneTriangle> triangles;
     std::vector<SceneLine> lines;
@@ -263,6 +266,16 @@ NJS_POINT3 camera_world_position(const SceneCamera& camera);
 // -cam.ln, njRotateZ/X/Y und die Kameraverschiebung. Danach ist z vor der
 // Kamera positiv und y zeigt nach unten.
 void camera_view_matrix(const SceneCamera& camera,NJS_MATRIX& out);
+// Host-Mod Breitbild (widescreen.h), keine Originalsemantik. Die Versteckmasken der Schnitte (CAM_WRK
+// hidobj, bhSetHideObject cut.c:620/641) sind fuer den 4:3-Ausschnitt gebaut: Raumteile, die in 4:3 nie
+// zu sehen sind, sind dort abgeschaltet. Im erweiterten 16:9-Streifen fehlen sie dann und lassen die
+// Hintergrundfarbe durch. Gezeigt werden genau die versteckten Objekte, deren saemtliche Eckpunkte vor
+// der Kamera und jenseits derselben senkrechten 4:3-Bildkante liegen - sie koennen im 4:3-Bereich nichts
+// verdecken, das 4:3-Bild bleibt bytegleich. Leer, solange der Mod aus ist (recvx_widescreen_scale 1).
+// Rueckgabe: sortierte Schluessel object + 32 * hidden_offset.
+std::vector<unsigned> widescreen_revealed_objects(const Scene& scene,const SceneCamera& camera);
+// camera.hidden_objects ohne die Bits der widescreen_revealed_objects.
+std::array<std::uint32_t,16> widescreen_hidden_mask(const std::array<std::uint32_t,16>& hidden,const std::vector<unsigned>& revealed);
 struct ModelPose {
     NJS_POINT3 position{};
     std::array<std::int32_t,3> angles{};
