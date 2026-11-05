@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Diagnostic SDL lobby cancel/bind-failure paths must preserve the selected NPC."""
+"""Diagnostic SDL lobby cancel/bind-failure paths must not leak the selected NPC into main NEW GAME."""
 import argparse
 import json
 import os
@@ -47,11 +47,11 @@ for occupied in (False,True):
         with (out/(name+'.log')).open('w') as log:
             subprocess.run(cmd,env=env,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=35)
         s=json.loads(state.read_text())
-        assert s['player2_selected_mode']=='npc' and s['player2']['mode']=='npc',s.get('player2')
+        assert s['player2_selected_mode']=='off' and not s.get('player2',{}).get('active',False),s.get('player2')
         assert not s['netplay'] and not s['lobby']['busy'],s['lobby']
         expected='cannot listen' if occupied else 'Waiting for guest'
         assert expected in s['lobby']['status'],s['lobby']
     finally:
         reservation.close()
     with socket.socket() as freed:freed.bind(('127.0.0.1',port))
-    print(f'{name}: NPC selection and actual game companion preserved; listener released PASS',flush=True)
+    print(f'{name}: main NEW GAME clears companion mode; listener released PASS',flush=True)

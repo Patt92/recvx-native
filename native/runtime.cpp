@@ -1026,7 +1026,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         auto frontend_command=[&](recvx::FrontendCommand command){if(command==recvx::FrontendCommand::Quit)frontend_quit=true;
             if(command==recvx::FrontendCommand::TitleCall)audio.play(13,"ADV",3); // TitleCall: PlayAdx(0,PatId,3)
             if(command==recvx::FrontendCommand::NewGame)first_game_start=true; /* bhSysCallTitle tk_flg 0x300020 -> bhSysCallOpening -> bhFirstGameStart ss_flg |= 0x100 (system.c:402/422) */
-            if(command==recvx::FrontendCommand::NewGame){if(player2_asset)player2_progress=std::make_shared<recvx::Player2Progress>((args.player2_model-10)%4);recvx::set_back_color(0u); /* system.c:410 bhSysCallOpening */retry_point.reset();if(events)system_data.ssd_flg=events->flags[16][0];inventory=recvx::Inventory{};inventory.all_item_init(system_data.ssd_flg); /* system.c:1414 AllItemInit mit sys->ssd_flg */combat=recvx::CombatController(args.data,args.mods);events.reset();game_over_requested=false;audio.stop(13); /* Mode -1: StopAdx(0) */load();gameplay_input.set_events(events.get());if(args.camera_explicit){if(args.camera>=scene.cameras.size())throw std::runtime_error("camera index outside room");camera_index=args.camera;camera=scene.cameras[camera_index];}}
+            if(command==recvx::FrontendCommand::NewGame){if(!frontend.multiplayer_start()){if(frontend.leave_lobby)frontend.leave_lobby();netplay.reset();netplay_note.clear();netplay_waiting=false;netplay_requested=false;args.player2=recvx::Player2Mode::Off;player2_asset.reset();player2_progress.reset();}if(player2_asset)player2_progress=std::make_shared<recvx::Player2Progress>((args.player2_model-10)%4);recvx::set_back_color(0u); /* system.c:410 bhSysCallOpening */retry_point.reset();if(events)system_data.ssd_flg=events->flags[16][0];inventory=recvx::Inventory{};inventory.all_item_init(system_data.ssd_flg); /* system.c:1414 AllItemInit mit sys->ssd_flg */combat=recvx::CombatController(args.data,args.mods);events.reset();game_over_requested=false;audio.stop(13); /* Mode -1: StopAdx(0) */load();gameplay_input.set_events(events.get());if(args.camera_explicit){if(args.camera>=scene.cameras.size())throw std::runtime_error("camera index outside room");camera_index=args.camera;camera=scene.cameras[camera_index];}}
             if(command==recvx::FrontendCommand::LoadGame){audio.stop(13);load_game_requested=true;} /* system.c:374 -> Schreibmaschinen-Ladebildschirm */};
         auto debug_room=[&](std::size_t destination,unsigned spawn,recvx::Player2RoomChange companion_change=recvx::Player2RoomChange::Event){
             if(destination>=rooms.size())throw std::runtime_error("Raum nicht vorhanden");
@@ -2420,6 +2420,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             else{std::string address=args.netplay_join;unsigned short port=recvx::Netplay::default_port;if(const auto colon=address.rfind(':');colon!=std::string::npos){port=static_cast<unsigned short>(std::stoul(address.substr(colon+1)));address.erase(colon);}
                 std::cout<<"Netplay: connecting to "<<address<<":"<<port<<" ("<<session<<")\n";netplay=recvx::Netplay::join(address,port,session,args.netplay_delay,args.netplay_timeout);}
             std::cout<<netplay->status()<<'\n';
+            if(frontend.active())frontend_command(frontend.lobby_connected());
         }
         // Lockstep drift check: a hash of the state both peers must share after each tick (positions, HP, enemies).
         auto netplay_hash=[&](){std::array<std::uint64_t,recvx::Netplay::parts> parts{};std::uint64_t* h=nullptr;
@@ -2542,7 +2543,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         };
         while(running){
             if(lobby_job&&lobby_job->result.wait_for(std::chrono::seconds(0))==std::future_status::ready){
-                try{netplay=lobby_job->result.get();args.player2=recvx::Player2Mode::Local;player2_asset=std::move(lobby_job->asset);player2_progress=std::move(lobby_job->progress);netplay_requested=true;frontend.lobby_connected();replay.erase(replay.begin(),replay.upper_bound(input_tick));input_tick=sim_tick=0;pad_on=pad_ps=pad_on_previous=0;accumulator=0;devices.suppress_held();if(player2_devices)player2_devices->suppress_held();netplay_note.clear();netplay_waiting=false;render_dirty=true;}
+                try{netplay=lobby_job->result.get();args.player2=recvx::Player2Mode::Local;player2_asset=std::move(lobby_job->asset);player2_progress=std::move(lobby_job->progress);netplay_requested=true;frontend_command(frontend.lobby_connected());replay.erase(replay.begin(),replay.upper_bound(input_tick));input_tick=sim_tick=0;pad_on=pad_ps=pad_on_previous=0;accumulator=0;devices.suppress_held();if(player2_devices)player2_devices->suppress_held();netplay_note.clear();netplay_waiting=false;render_dirty=true;}
                 catch(const std::exception& error){frontend.lobby_status=error.what();frontend.lobby_busy=false;}
                 lobby_job.reset();
             }

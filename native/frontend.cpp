@@ -77,7 +77,7 @@ void Frontend::check_button(){
         const int command=row_command(cursor_);
         switch(command){
         case 0: if(sound)sound(3);from_title_=1;title_call(3);break;        // LOAD GAME (adv.c:1953 FromTitle 1): system.c:374 ss_flg 0x200, tk_flg 0x308040, typ_md0 0 -> Ladebildschirm
-        case 1: from_title_=0;title_call(2);break;                          // NEW GAME: AppMode 1, sys->gm_mode 0, TitleCall(PortId, 2)
+        case 1: multiplayer_start_=false;from_title_=0;title_call(2);break;                          // NEW GAME: AppMode 1, sys->gm_mode 0, TitleCall(PortId, 2)
         case 2: from_title_=2;next_return_code_=4;mode_=17;if(sound)sound(3);request_adv_fade(3,samurai(50));break; // OPTION: AppMode 0
         case 3: from_title_=3;title_call(6);break;                          // BATTLE GAME (ExtraFlag): sys->gm_mode 3, TitleCall(PortId, 6)
         case 5: screen_=Screen::Multiplayer;selected_=0;if(sound)sound(3);break;
@@ -257,7 +257,14 @@ std::string Frontend::presentation_row_value(unsigned row)const{
 void Frontend::draw(SoftwareRenderer& image,GameUi& ui,std::size_t controllers){
     if(screen_==Screen::Title){draw_title(image,ui);return;}
     if(multiplayer()){
-        ui.draw_title(image);panel(image,12,176,616,300);
+        ui.draw_title(image);
+        if(!lobby()){
+            const char* entries[]={"SOLO","LOBBY","BACK"};
+            for(unsigned i=0;i<3;++i){const std::string text=entries[i];const int x=(640-ui.label_width(text,1.f))/2,y=288+int(i)*32;
+                ui.label(image,text,x+3,y+3,1.f,0xff000000);ui.label(image,text,x,y,1.f,i==selected_?0xffffffff:0xff7f7f7f);}
+            return;
+        }
+        panel(image,12,176,616,300);
         auto line=[&](const std::string& text,int y,unsigned color=0xffbfbfbf){ui.label(image,text,(640-ui.label_width(text,.65f))/2,y,.65f,color,.65f);};
         line(lobby()?"LOBBY":"MULTIPLAYER",184,0xffffffff);
         std::vector<std::string> entries=lobby()?std::vector<std::string>{lobby_host?"CREATE LOBBY":"JOIN LOBBY",lobby_host?(lobby_player2?"HOST: PLAYER 2 / GUEST: PLAYER 1":"HOST: PLAYER 1 / GUEST: PLAYER 2"):"PLAYER: ASSIGNED BY HOST","ADDRESS / PHRASE",lobby_busy?"CONNECTING...":"CONNECT",std::string(lobby_tool_==0?"COPY ADDRESS":lobby_tool_==1?"COPY PHRASE":lobby_tool_==2?"PASTE ADDRESS":"CLEAR ADDRESS")+"  (L/R)","BACK"}:std::vector<std::string>{"SOLO","LOBBY","BACK"};
@@ -319,7 +326,7 @@ FrontendCommand Frontend::multiplayer_input(MenuInput key){
     if(key==MenuInput::Cancel||(key==MenuInput::Confirm&&selected_==(lobby()?5u:2u))){if(lobby()){if(leave_lobby)leave_lobby();screen_=Screen::Multiplayer;selected_=1;}else{screen_=Screen::Title;mode_=8;cursor_=multiplayer_row;}return FrontendCommand::None;}
     if(key==MenuInput::Up&&selected_)--selected_;
     if(key==MenuInput::Down)selected_=std::min(selected_+1,lobby()?5u:2u);
-    if(!lobby()){if(key==MenuInput::Confirm){if(selected_==0){if(solo_with_npc)solo_with_npc();screen_=Screen::Title;mode_=8;cursor_=new_game_cursor;}else if(selected_==1){screen_=Screen::Lobby;selected_=0;lobby_status.clear();if(!lobby_address_initialized_){lobby_address=Netplay::local_address()+":"+std::to_string(Netplay::default_port);lobby_address_initialized_=true;}}}return FrontendCommand::None;}
+    if(!lobby()){if(key==MenuInput::Confirm){if(selected_==0){if(solo_with_npc)solo_with_npc();return start_multiplayer();}else if(selected_==1){screen_=Screen::Lobby;selected_=0;lobby_status.clear();if(!lobby_address_initialized_){lobby_address=Netplay::local_address()+":"+std::to_string(Netplay::default_port);lobby_address_initialized_=true;}}}return FrontendCommand::None;}
     if(lobby_busy&&selected_!=4)return FrontendCommand::None;
     if(key==MenuInput::Left||key==MenuInput::Right||key==MenuInput::Confirm){if(selected_==4){if(key==MenuInput::Confirm)lobby_clipboard(lobby_tool_);else lobby_tool_=(lobby_tool_+4+(key==MenuInput::Right?1:-1))%4;}else if(selected_==0)lobby_host=!lobby_host;else if(selected_==1&&lobby_host)lobby_player2=!lobby_player2;else if(selected_==2&&key==MenuInput::Confirm){lobby_edit_=true;lobby_edit_before_=lobby_address;lobby_select_all_=false;lobby_character_=unsigned(lobby_address.size());SDL_StartTextInput();}else if(selected_==3&&key==MenuInput::Confirm&&connect_lobby)connect_lobby(lobby_host,lobby_player2,lobby_address);}
     return FrontendCommand::None;

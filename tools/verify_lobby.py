@@ -14,6 +14,7 @@ for role in ('host','guest'):
     script=base+('150 down\n160 right\n' if role=='host' else '150 right\n160 down\n')+f'170 down\n180 confirm\n181 sdl_key down Delete\n182 sdl_key up Delete\n183 sdl_text 127.0.0.1:{port}\n190 confirm\n200 down\n210 confirm\n'
     replay=out/(role+'.txt');replay.write_text(script)
     state=out/(role+'.json');log=(out/(role+'.log')).open('w')
+    for ext in ('.bmp','.json'):(out/(role+ext)).unlink(missing_ok=True)
     cmd=[str(a.runtime.resolve()),'--data',str(a.data.resolve()),'--mods',str(out/'no-mods'),'--user-dir',str(out/('user-'+role)),'--player2','npc','--renderer','software','--ss','1','--replay',str(replay),'--frames','900','--state',str(state),'--screenshot',str(out/(role+'.bmp'))]
     processes.append((subprocess.Popen(cmd,env=env,stdout=log,stderr=subprocess.STDOUT),state,log))
 try:
@@ -22,6 +23,7 @@ try:
     h,g=[json.loads(state.read_text()) for _,state,_ in processes]
     assert 'Player 2' in h['netplay'] and 'Player 1' in g['netplay'],(h['netplay'],g['netplay'])
     assert h['player2_selected_mode']==g['player2_selected_mode']=='local'
+    assert not h['title_active'] and not g['title_active'], 'connected lobby did not start directly'
     assert 'DESYNC' not in h['netplay']+g['netplay'],(h['netplay'],g['netplay'])
     assert h['input_tick']==g['input_tick']==900,(h['input_tick'],g['input_tick'])
     assert h['title_mode']==g['title_mode'] and h['title_cursor']==g['title_cursor']

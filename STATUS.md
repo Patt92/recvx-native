@@ -43,12 +43,14 @@ drives Player 1 in AI play (**Player AI**, `--player-ai`, default on with
 the keyboard; the driver's fight reflex defers to it. Debug row **Player 2 model**
 switches the companion between Claire/Chris/Steve/Wesker/Claire costume 1.
 **Netplay** (`--netplay-host`/`--netplay-join`): peer-to-peer lockstep over one
-TCP connection; title MULTIPLAYER -> SOLO (NPC companion) / LOBBY, host-selectable player seats,
+TCP connection; title MULTIPLAYER -> SOLO (direct NPC game start) / LOBBY (direct start after handshake), host-selectable player seats,
+main-menu NEW GAME stays single-player; centered Solo/Lobby title submenu,
 IPv4 or checksummed word phrase, clipboard/controller address editor, default
 TCP 57341 with exclusive binding; cancelled/failed connections preserve the NPC. Same platform/data/options
 required, drift hash every 15 ticks; [docs/NETPLAY.md](docs/NETPLAY.md),
 `tests/native/netplay_test.cpp`, `tools/verify_netplay.py`, `tools/verify_lobby.py`;
-macOS arm64 development binary only; `build/validation/lobby/`.
+macOS arm64 development binary only; `build/validation/lobby/` and
+`build/validation/multiplayer-direct/` (direct-start, cancel and UI verification).
 Side-by-side trade uses native crate entry/stack/sort rules with atomic rollback;
 Shift+Tab or L1/LB + Inventory opens it beside an active partner. Aim (R/RB)
 on a partner weapon/medicine opens Equip/Unequip/Use (plus Reload for an equipped

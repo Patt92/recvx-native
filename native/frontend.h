@@ -44,7 +44,8 @@ public:
     std::function<void()> solo_with_npc;
     bool lobby_busy=false,lobby_host=true,lobby_player2=false;
     std::string lobby_address="127.0.0.1:57341",lobby_status;
-    void lobby_connected(){screen_=Screen::Title;mode_=0;from_title_=0;lobby_busy=false;}
+    FrontendCommand lobby_connected(){lobby_busy=false;return start_multiplayer();}
+    bool multiplayer_start()const{return multiplayer_start_;}
     bool settings()const{return screen_==Screen::Controls;}
     bool title()const{return screen_==Screen::Title;}
     bool starting()const{return screen_==Screen::Title&&mode_==17&&gen_flag_;} // TitleCall fade (Mode 17, GenFlag 1)
@@ -134,6 +135,8 @@ private:
     bool lobby_edit_=false,lobby_address_initialized_=false,lobby_select_all_=false;unsigned lobby_character_=0,lobby_tool_=0;
     std::string lobby_edit_before_;
     void lobby_clipboard(unsigned action);
+    bool multiplayer_start_=false;
+    FrontendCommand start_multiplayer(){multiplayer_start_=true;screen_=Screen::Title;from_title_=0;title_call(2);return FrontendCommand::TitleCall;}
     FrontendCommand multiplayer_input(MenuInput key);
     FrontendCommand controls_input(MenuInput key,bool pad);
 };

@@ -35,7 +35,10 @@ int main(int argc,char** argv){try{
         lobby.lobby_busy=true;lobby.input(MenuInput::Right);SDL_SetClipboardText("1.2.3.4:1234");lobby.input(MenuInput::Confirm);check(lobby.lobby_address=="127.0.0.1:57341","clipboard altered an active connection address");lobby.lobby_busy=false;
         for(unsigned i=0;i<6;++i)lobby.input(MenuInput::Up);
         lobby.input(MenuInput::Down);lobby.input(MenuInput::Right);lobby.input(MenuInput::Down);lobby.input(MenuInput::Down);lobby.input(MenuInput::Confirm);check(connected,"lobby player assignment not passed to runtime");
-        lobby.lobby_busy=true;lobby.input(MenuInput::Cancel);check(left&&!lobby.lobby(),"busy lobby cannot cancel");lobby.lobby_busy=false;lobby.input(MenuInput::Up);lobby.input(MenuInput::Confirm);check(lobby.title()&&solo,"solo does not select the NPC companion and return to title");
+        lobby.lobby_busy=true;lobby.input(MenuInput::Cancel);check(left&&!lobby.lobby(),"busy lobby cannot cancel");lobby.lobby_busy=false;lobby.input(MenuInput::Up);check(lobby.input(MenuInput::Confirm)==FrontendCommand::TitleCall&&lobby.starting()&&solo&&lobby.multiplayer_start(),"solo must start directly with NPC");
+        FrontendCommand started=FrontendCommand::None;for(unsigned i=0;i<400&&lobby.active();++i)started=lobby.apply({});check(started==FrontendCommand::NewGame&&!lobby.active(),"solo fade must enter game without another confirmation");
+        lobby.show_main();const auto normal=lobby.replay_new_game();check(!lobby.multiplayer_start()&&!normal.empty(),"main NEW GAME retains multiplayer mode");
+        check(lobby.lobby_connected()==FrontendCommand::TitleCall&&lobby.multiplayer_start()&&lobby.starting(),"connected lobby must start directly");
     }
     // Der gespeicherte Einstellungsstand muss die Host-Pause auf Escape behalten und
     // Escape aus quit heraushalten, sonst schliesst die Pausentaste ein laufendes Spiel.

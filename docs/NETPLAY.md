@@ -9,7 +9,7 @@ the local two-player mode.
 
 ## Start
 
-Use **MULTIPLAYER** in the title menu, then **SOLO** (disconnect and select Player 2 as the NPC companion) or **LOBBY**. The host selects CREATE LOBBY, its player
+Use **MULTIPLAYER** in the title menu, then **SOLO** (start a new game directly with the NPC companion) or **LOBBY**. The host selects CREATE LOBBY, its player
 seat, and CONNECT. The guest selects JOIN LOBBY, enters the host address or
 seven-word address phrase, then CONNECT. The host decides the seats, including
 host Player 2 / guest Player 1. Player 1 controls the title and shared menus.
@@ -45,7 +45,10 @@ the lobby. Network connect, handshake and timeout run off the SDL thread.
 A pending connection stages its Player-2 assets privately; it changes the
 selected mode only after a successful handshake. Cancel, Back or an error
 preserves the previous companion mode and state. SOLO releases the network
-session and selects the NPC companion for the next game.
+session and starts a new game with the NPC companion through the existing title fade.
+Main-menu NEW GAME always starts without Player 2. A successful lobby handshake
+starts both players directly, without returning to the main menu. The Solo/Lobby
+submenu uses the title background and centered original system font.
 
 The listener does not use address sharing: an existing listener, including one
 bound only to a particular interface, must cause a port-in-use error. A recently
@@ -70,8 +73,7 @@ build/macos-arm64/recvx-runtime --data data --netplay-join 192.168.1.10:57341
 ```
 
 Both commands imply `--player2 local`. The host waits for the guest
-(`--netplay-timeout`, default 120 s), then both runtimes continue at the title
-screen; the host's input chooses NEW GAME. `--player2-model 10..14` selects the
+(`--netplay-timeout`, default 120 s), then both runtimes start the game directly through the title fade. `--player2-model 10..14` selects the
 guest's character (Claire, Chris, Steve, Wesker, Claire costume 1) and must be
 the same on both sides. Forward the TCP port on the host's router for sessions
 across the internet.
@@ -142,3 +144,7 @@ after the handshake. Frontend tests isolate SDL's clipboard with the dummy video
 driver and cover keyboard/GUI shortcuts, controller clipboard actions, invalid
 paste rollback, cursor insertion/backspace and edit cancellation. Evidence:
 `build/validation/lobby/sessions-final/`, `connect-expanded/`, `editor/`.
+
+Direct start and main-menu isolation: `tools/verify_multiplayer_start.py`,
+`tools/verify_lobby.py`, `tools/verify_lobby_sessions.py`; diagnostic captures
+and states in `build/validation/multiplayer-direct/`.
