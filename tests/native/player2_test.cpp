@@ -179,6 +179,23 @@ static void npc_combat(const std::filesystem::path& data){
         check(ready.action=="attack"&&ready.controls.aim&&!ready.controls.attack&&!ready.controls.next_target,"attack pressed outside the original ready stance");
         self.combat_mode=65u;const auto strike=world.npc_ai(self);
         check(strike.action=="attack"&&strike.controls.attack&&!strike.controls.turn&&!strike.controls.next_target,"ranged decision with a lock in mode2 65 did not press attack");
+        for(unsigned stance:{66u,67u}){
+            self.combat_mode=stance;check(world.npc_ai(self).controls.attack,"high/low ready stance did not fire");
+            self.fire=false;check(world.npc_ai(self).controls.next_target,"high/low ready stance did not re-search a lost target");self.fire=true;
+        }
+        check(weapon_automatic_fire(12)&&!weapon_automatic_fire(3),"native SMG/handgun fire mode classification");
+        self.automatic_fire=true;
+        for(unsigned firing:{69u,169u}){self.combat_mode=firing;check(world.npc_ai(self).controls.attack,"automatic weapon released trigger during firing");}
+        self.combat_mode=65u;self.release_trigger=true;
+        const auto release=world.npc_ai(self);check(!release.controls.attack&&!release.controls.next_target,"burst trigger release lost the current target or kept firing");self.release_trigger=false;
+        self.combat_mode=169u;
+        self.automatic_fire=false;check(!world.npc_ai(self).controls.attack,"single-shot weapon kept trigger held during firing");
+        // Boundary fixture on an actual room work: original enemies can still
+        // be alive at 0 HP. Publish the work through the ordinary enemy pass.
+        auto* zero=world.enemy_table().slot[strike.target];check(zero!=nullptr,"zero-HP fixture enemy missing");
+        const int saved_hp=zero->hp;zero->hp=0;world.tick_enemy_pass();
+        self.combat_mode=65;check(world.npc_ai(self).target==strike.target,"living zero-HP enemy was discarded by NPC policy");
+        zero->hp=saved_hp;world.tick_enemy_pass();
         self.reach=-1.f;self.fire=true;self.combat_mode=65u;const auto knife=world.npc_ai(self);
         check(!knife.controls.next_target,"melee decision pressed the re-search");
         NpcAiActor far{spawn,world.floor_at(spawn.position),0u,{},{}};far.actor.position.x+=400.f;
@@ -215,14 +232,39 @@ static void npc_combat(const std::filesystem::path& data){
         std::cout<<"NPC firearm: no fire on an empty magazine, original reload with spare rounds after "<<k<<" ticks PASS\n";
     }
 }
-static void enemy_binding(const std::filesystem::path& data){
+static void npc_smg(const std::filesystem::path& data){
+    // Steve with his own 300-round SMG, original RM_0080 enemies and native
+    // ammo/damage owners. Positions and attack-disable switches are diagnostic.
+    const auto bytes=RoomArchive(data).load("RM_0080.RDX",64*1024*1024);const auto scene=decode_scene(bytes);
+    auto primary=scene.spawns.at(0);std::size_t motion=42;std::int64_t frame=0;AudioMixer audio(data);
+    auto body=PlayerAsset::load(data);auto steve=std::make_shared<PlayerAsset>(PlayerAsset::load(data,12));
+    Inventory inventory;MessageDialog dialog;std::uint32_t head=0;
+    RoomWorld world(bytes,scene,primary,motion,frame,audio,data,{},"RM_0080");EventVm events(bytes,inventory,dialog);
+    world.set_player_asset(&body);world.bind_player_collision(events);world.bind_enemy_player(inventory.hp,head);
+    world.set_enemy_ai(true);world.set_enemy_grab(false);world.set_enemy_attacks(false);
+    world.commit_player_joints(body.script_nodes(body.pose(motion,frame,primary.position,primary.yaw)));
+    events.binding=[&](const EventCommand& c){return world.bind(c);};events.initialize();world.set_simulation_flags(events.flags[6][0]);world.tick();
+    primary={{-25,0,33.15f},8192};auto progress=std::make_shared<Player2Progress>(2);
+    progress->equipment.items.fill(0);progress->equipment.wpnr_no=0;
+    check(progress->equipment.acquire(2,300)&&progress->equipment.equip(2),"Steve SMG fixture failed");
+    world.enable_player2(Player2Mode::Npc,steve,{{-17,0,33.15f},8192},2,progress);
+    unsigned longest=0,start_rounds=300,last_attacks=0;
+    for(unsigned t=0;t<300;++t){world.tick_enemy_pass();world.tick_player2({},true);world.tick_after_player();
+        const auto& equipment=progress->equipment;const unsigned rounds=Inventory::quantity(equipment.slots()[equipment.slots()[0]]);
+        if(progress->attacks!=last_attacks){last_attacks=progress->attacks;start_rounds=rounds;}
+        else longest=std::max(longest,start_rounds-rounds);
+    }
+    check(progress->hits>0&&longest>=2,"Steve SMG still fires only once per attack animation");
+    std::cout<<"Steve SMG: multiple native shots in one attack, hits and own ammo consumption PASS\n";
+}
+static void enemy_binding(const std::filesystem::path& data,unsigned model=11,Player2Mode mode=Player2Mode::Local){
     // Host binding of the enemy mechanisms to Player 2 in RM_0031, whose free zombies (type 0, mode0 1) bite the
     // player at the spawn (verify_enemy_ai.py "rm0031-natural"). Player 2 stands beside zombie 5 at a diagnostic
     // position, Player 1 keeps the spawn: the nearer actor must be chosen, driven (plp mode0 4/5/6) and lose HP
     // through the ordinary player_set/player_damage path; Player 1 stays untouched.
     const auto bytes=RoomArchive(data).load("RM_0031.RDX",64*1024*1024);const auto scene=decode_scene(bytes);
     auto primary=scene.spawns.at(0);std::size_t motion=42;std::int64_t frame=0;AudioMixer audio(data);
-    auto body=PlayerAsset::load(data);auto secondary=std::make_shared<PlayerAsset>(PlayerAsset::load(data,11));
+    auto body=PlayerAsset::load(data);auto secondary=std::make_shared<PlayerAsset>(PlayerAsset::load(data,model));
     Inventory inventory;MessageDialog dialog;std::uint32_t head=0;inventory.hp=160;
     RoomWorld world(bytes,scene,primary,motion,frame,audio,data,{},"RM_0031");EventVm events(bytes,inventory,dialog);
     world.set_player_asset(&body);world.bind_player_collision(events);world.bind_enemy_player(inventory.hp,head);
@@ -230,7 +272,7 @@ static void enemy_binding(const std::filesystem::path& data){
     world.commit_player_joints(body.script_nodes(body.pose(motion,frame,primary.position,primary.yaw)));
     events.binding=[&](const EventCommand& c){return world.bind(c);};events.initialize();world.set_simulation_flags(events.flags[6][0]);world.tick();
     const SceneSpawn spawn{{28.f,0.f,75.f},0};
-    world.enable_player2(Player2Mode::Local,secondary,spawn,1);
+    world.enable_player2(mode,secondary,spawn,(model-10)%4);
     const int p1_hp=inventory.hp;bool driven=false,targeted=false;unsigned t=0;
     for(;t<1500&&(world.player2_state()->hp>=160||!driven);++t){
         world.tick_enemy_pass();
@@ -246,8 +288,8 @@ static void enemy_binding(const std::filesystem::path& data){
     check(inventory.hp==p1_hp&&!world.player_grabbed(),"Player 1 was bitten instead of Player 2");
     for(unsigned k=0;k<900&&world.player2_driven();++k){world.tick_enemy_pass();world.tick_player2({},true);world.tick_after_player();}
     check(!world.player2_driven(),"the zombie never released Player 2");
-    check(world.player2_state()->motion==42&&world.player2_progress()->life==Player2Life::Active,"release did not return Player 2 to its idle pose");
-    std::cout<<"Enemy targeting of Player 2: RM_0031 zombie grab after "<<t<<" ticks, HP loss through player_set, release to idle, Player 1 untouched PASS\n";
+    check((mode==Player2Mode::Npc||world.player2_state()->motion==42)&&world.player2_progress()->life==Player2Life::Active,"release did not return Player 2 to free control");
+    std::cout<<"Enemy targeting of Player 2 model "<<model<<": RM_0031 zombie grab after "<<t<<" ticks, HP loss through player_set, release, Player 1 untouched PASS\n";
 }
 static void room_policy(){
     Player2Progress p;const SceneSpawn start{{1,2,3},1234},entry{{20,4,30},5678};
@@ -309,4 +351,4 @@ static void independent_room(const std::filesystem::path& data){
     check(joined.player2_present()&&same(joined.player2_state()->transform.position,target_entry.position)&&!progress->teleports,"Player 1 entering the NPC room did not rejoin the resident");
     std::cout<<"NPC independent original door after "<<ticks<<" ticks: no story/primary writes, dormant neighbor, real POS entry and rejoin PASS\n";
 }
-int main(int argc,char** argv){try{SDL_SetMainReady();routing();check(argc==2,"data path required");room_policy();world_actor(argv[1]);companion(argv[1]);npc_combat(argv[1]);enemy_binding(argv[1]);independent_room(argv[1]);return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(int argc,char** argv){try{SDL_SetMainReady();routing();check(argc==2,"data path required");room_policy();world_actor(argv[1]);companion(argv[1]);npc_combat(argv[1]);npc_smg(argv[1]);enemy_binding(argv[1]);enemy_binding(argv[1],12,Player2Mode::Npc);independent_room(argv[1]);return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

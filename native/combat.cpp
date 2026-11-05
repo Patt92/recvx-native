@@ -10,6 +10,7 @@
 namespace recvx {
 #include "combat_tables_data.inc"
 bool weapon_shot_sound(unsigned weapon,unsigned& bank,unsigned& program){if(weapon>=23||!WpnTab[weapon].seno0)return false;bank=unsigned(WpnTab[weapon].snd_wpno);program=unsigned(WpnTab[weapon].seno0)&255;return true;}
+bool weapon_automatic_fire(unsigned weapon,bool single_shot){return weapon<23&&(WpnTab[weapon].flg&0x40u)&&!((WpnTab[weapon].flg&0x200u)&&single_shot);}
 NJS_POINT3 weapon_fire_offset(unsigned weapon){if(weapon>=23)throw std::runtime_error("weapon outside WpnTab");return WpnTab[weapon].wp_fps1;}
 float CombatController::target_distance(NJS_POINT3 origin,NJS_POINT3 direction,float range,NJS_POINT3 position,float radius,float height){
     const float cap=std::min(radius,height*.5f),bottom=position.y+cap,top=position.y+height-cap;
@@ -180,7 +181,17 @@ struct CombatOriginal {
 // bhCPM1_act_atk (player.c:4481) verteilt auf plp->mode2; bhCPM2_act_suw
 // (player.c:4545) und die übrigen mode2-Zweige schalten auf plp->mode3.
 unsigned CombatController::original_mode()const{return original_?unsigned(original_->player().mode2):0;}
-bool CombatController::locked_target()const{return original_&&original_->result.active&&((original_->result.flg&0x100000u)||original_->result.locked>0);}
+bool CombatController::locked_target(const RECVX_ENEMY_TABLE& enemies)const{
+    if(!original_||!original_->result.active)return false;
+    const auto valid=[](const RECVX_ENEMY_WORK* e){return e&&recvx_enemy_targetable(e)&&(e->flg&0x20u)&&!(e->flg&2u)&&e->hp>=0;};
+    const auto& p=original_->player();
+    // player.c:1419-1457 clears flg 0x100000 when the turn completes, not
+    // when the target disappears. src_no remains the native search result.
+    if(p.src_no>=0&&unsigned(p.src_no)<enemies.ewk_n&&valid(enemies.slot[p.src_no]))return true;
+    for(int i=0;i<p.pp.lck_n&&i<int(std::size(p.pp.lck_tbl));++i)if(valid(p.pp.lck_tbl[i]))return true;
+    return false;
+}
+bool CombatController::trigger_release_required()const{const auto mode=original_mode();return original_&&mode>=65&&mode<=67&&(original_->player().at_flg&0x40u);}
 unsigned CombatController::original_phase()const{return original_?unsigned(original_->player().mode3):0;}
 // player.c:1809/1815: der Pass gehört bhCPM1_act_atk genau bei mode1 != 0.
 bool CombatController::aiming()const{return original_&&original_->result.active;}

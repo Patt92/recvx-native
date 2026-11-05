@@ -1,10 +1,19 @@
 #include "host_process.h"
 #include <cstdlib>
+#include <cstring>
 #include <stdexcept>
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+// The external Python driver is a desktop host facility. Mobile app bundles
+// have no Python child-process integration (Android API 26 also lacks spawn).
+#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
+#define RECVX_NO_HOST_PROCESS 1
+#endif
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#else
+#elif !defined(RECVX_NO_HOST_PROCESS)
 #include <csignal>
 #include <fcntl.h>
 #include <spawn.h>
@@ -13,7 +22,14 @@
 extern char** environ;
 #endif
 namespace recvx {
-#if defined(_WIN32)
+#if defined(RECVX_NO_HOST_PROCESS)
+void HostProcess::start(const std::string&,const std::vector<std::string>&,const std::filesystem::path&,const std::filesystem::path&){
+    throw std::runtime_error("External AI driver processes are not supported on this platform");
+}
+bool HostProcess::running(){return false;}
+void HostProcess::stop(){}
+std::string find_python(){return {};}
+#elif defined(_WIN32)
 void HostProcess::start(const std::string& program,const std::vector<std::string>& arguments,const std::filesystem::path& cwd,const std::filesystem::path& log){
     stop();
     std::string command="\""+program+"\"";for(const auto& a:arguments)command+=" \""+a+"\"";

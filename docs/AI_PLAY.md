@@ -4,6 +4,12 @@ Short version and setup: README, section "Let your AI play the game".
 This document has the details: settings, how the driver works, the control
 channel underneath and its limits.
 
+The external Python driver uses desktop host processes (macOS, Windows, Linux).
+The mobile builds have no local Python process integration: `HostProcess::start`
+reports an unsupported-platform error on Android and iOS/tvOS, and Python
+discovery returns no executable. The in-process NPC/Player AI is independent
+of this host helper.
+
 ## Settings (.env)
 
 `.env` in the project folder holds the endpoint settings for

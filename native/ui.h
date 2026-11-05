@@ -222,7 +222,7 @@ public:
     // 2: 0 = table values (not scrolling), 1 = parts_09b[20] lit (Up), 2 =
     // parts_09b[21] lit (Down), 3 = both neutral (18).
     void draw_box(SoftwareRenderer& image,const Inventory& inventory,const StatusMenu& menu,unsigned base,unsigned index,bool selecting,const StatusSlide* slide=nullptr,unsigned exit_state=0,unsigned note=0,float row_shift=0.f,unsigned arrows=0,unsigned cursor_cell=0)const;
-    void draw_trade(SoftwareRenderer& image,const Inventory& primary,const Inventory& partner,bool npc,unsigned pane,std::array<unsigned,2> cells,bool selecting,unsigned source_pane,unsigned source_cell,const std::string& note)const;
+    void draw_trade(SoftwareRenderer& image,const Inventory& primary,const Inventory& partner,bool npc,unsigned pane,std::array<unsigned,2> cells,bool selecting,unsigned source_pane,unsigned source_cell,const std::string& note,const std::vector<std::string>& actions={},unsigned action_cursor=0)const;
     void draw_title(SoftwareRenderer& image);
     // Menue-/Schriftatlanten und Inventarmodelle neu ueber apply_texture_files laden (Debugschalter Textur-Mods).
     void reload_textures();

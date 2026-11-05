@@ -11,6 +11,8 @@ namespace recvx {
 NJS_POINT3 weapon_fire_offset(unsigned weapon);
 // WpnTab[w].snd_wpno / seno0 (CallPlayerWeaponSeEx); false when the weapon has no shot sound.
 bool weapon_shot_sound(unsigned weapon,unsigned& bank,unsigned& program);
+// player.c:5269: the native automatic branch, including the burst/single selector (ev_flg 74).
+bool weapon_automatic_fire(unsigned weapon,bool single_shot=false);
 // RECVX_CB_EFFECT.sys_ef: bhSetEffectTb(&sys->ef, ...) schreibt die gemeinsame Vorlage.
 void sys_ef_request(EffectSpawn& spawn,bool with_ax);
 // weapon.c:1632 bhSetGunSplash(gap, pos, wattr) auf der einen Vorlage sys->ef
@@ -46,9 +48,10 @@ public:
     bool weapon_models_hidden()const{return weapon_models_hidden_;}
     bool aiming()const;
     unsigned original_mode()const;
-    // A target is locked in the current weapon pass: plp->flg 0x100000 with src_no from the draw's
-    // bhSearchNearEnemy (player.c:4619 bhCPM2_act_suw) or bhNextTarget, or a LckTbl entry (playpch.c).
-    bool locked_target()const;
+    // Living target in src_no from bhSearchNearEnemy/bhNextTarget, or a LckTbl
+    // entry (playpch.c). flg 0x100000 only marks the temporary body turn.
+    bool locked_target(const RECVX_ENEMY_TABLE& enemies)const;
+    bool trigger_release_required()const; // native ready stance retains at_flg 0x40 until release
     unsigned original_phase()const;
     bool attacking()const;
     std::int16_t aim_yaw()const; // plp->way of the combat player work

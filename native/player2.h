@@ -23,6 +23,8 @@ struct NpcAiActor {
     bool fire=true;
     bool armed=true; // false: no usable weapon (empty firearm without spare rounds), follow only
     bool goal_on_stairs=false; // the goal lies on a stair area whose floor number differs from the actor's
+    bool automatic_fire=false; // keep attack held in native firing modes 69/169; cadence stays in the weapon owner
+    bool release_trigger=false; // native burst completion or empty-magazine transition needs a fresh press
 };
 struct NpcAiDecision {
     Player2Command controls;

@@ -123,4 +123,36 @@ static void partner_actions(const std::filesystem::path& data){
     world.enable_player2(Player2Mode::Local,asset,player,1,minimum);check(world.use_player2_item(minimum->equipment.search(21),0).has_value()&&world.player2_state()->hp==51,"living human at 1 HP inherited NPC incapacity");
     std::cout<<"Partner actions: native equipment toggle, heal/poison/mode/cap/consumption, ownership, cancel and immutable/dead guards PASS\n";
 }
-int main(int argc,char** argv){try{check(argc==2,"data required");transfers();chords();world_ui(argv[1]);partner_actions(argv[1]);return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+// Actual atlas rendering, not just menu state: catch reversed bag ownership,
+// cursor occlusion by opaque icons, wide cursors and frame masks in the footer.
+static void render_layout(const std::filesystem::path& data){
+    GameUi ui(data);auto primary=bag(),partner=bag(1);primary.acquire(8,1);partner.acquire(5,18);
+    auto draw=[&](const Inventory& a,const Inventory& b,unsigned pane,std::array<unsigned,2> cells=std::array<unsigned,2>{0,0},bool selecting=false){
+        SoftwareRenderer image(640,480);ui.draw_trade(image,a,b,true,pane,cells,selecting,0,0,"");return image;
+    };
+    auto pixel=[](const SoftwareRenderer& image,int x,int y){return image.pixels()[y*640+x];};
+    auto differences=[&](const SoftwareRenderer& a,const SoftwareRenderer& b,int x,int y,int w,int h){unsigned count=0;for(int j=y;j<y+h;++j)for(int i=x;i<x+w;++i)count+=pixel(a,i,j)!=pixel(b,i,j);return count;};
+    const auto normal=draw(primary,partner,0);auto changed_primary=bag();changed_primary.acquire(21,1);const auto changed=draw(changed_primary,partner,0);
+    check(differences(normal,changed,84,96,136,192)>100,"primary inventory is not drawn in the left pane");
+    check(!differences(normal,changed,412,96,136,192),"primary item changed the right partner pane");
+    auto red=[&](const SoftwareRenderer& image,int x,int y,int w,int h){unsigned count=0;for(int j=y;j<y+h;++j)for(int i=x;i<x+w;++i){const auto c=pixel(image,i,j);count+=((c>>16)&255)>120&&((c>>8)&255)<48&&(c&255)<48;}return count;};
+    auto cursor=[&](const SoftwareRenderer& image,int x,int y,int width){
+        check(red(image,x,y,width,4)>unsigned(width),"red cursor top missing/covered");
+        check(red(image,x,y+52,width,4)>unsigned(width),"red cursor bottom missing/covered");
+        check(red(image,x,y,4,56)>56,"red cursor left missing/covered");
+        // parts_15[0] includes transparent padding; it scales with a wide cursor.
+        check(red(image,x+width-8,y,8,56)>56,"red cursor right missing/covered");
+    };
+    cursor(normal,80,92,76);cursor(draw(primary,partner,1),408,92,76);
+    auto wide=bag();wide.side_pack=true;check(wide.acquire(1,1),"wide render fixture failed");const auto wide_first=draw(wide,partner,0),wide_half=draw(wide,partner,0,{1,0});
+    cursor(wide_first,80,92,144);check(wide_first.pixels()==wide_half.pixels(),"wide item's second cell draws a different cursor or label");
+    const auto last=draw(wide,partner,0,{9,0});cursor(last,148,284,76);
+    const auto destination=draw(wide,partner,1,{0,0},true);cursor(destination,408,92,76);
+    const auto no_source=draw(wide,partner,1);
+    check(differences(destination,no_source,80,92,144,4)>144&&differences(destination,no_source,216,92,8,56)>56,"wide source marker lost during destination selection");
+    auto empty=bag(),expanded=empty;expanded.side_pack=true;
+    const auto small=draw(empty,empty,0),large=draw(expanded,expanded,0);
+    check(!differences(small,large,0,368,640,112),"inventory frame/side-pack masks overlap the shared message panel");
+    std::cout<<"Trade rendered layout: left/right ownership, all cursor edges, wide source/destination and side-pack footer isolation PASS\n";
+}
+int main(int argc,char** argv){try{check(argc==2,"data required");transfers();chords();world_ui(argv[1]);partner_actions(argv[1]);render_layout(argv[1]);return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

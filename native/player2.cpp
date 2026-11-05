@@ -214,7 +214,9 @@ Player2Command RoomWorld::player2_ai(){
     // attack press on an empty magazine, with its animation); neither = no engagement, no empty clicks.
     const bool firearm=bag.weapon()>=3;const unsigned rounds=bag.slots()[0]<12?Inventory::quantity(bag.slots()[bag.slots()[0]]):0u;
     actor.armed=bag.weapon()==2||(firearm&&(rounds>0||bag.reload_available()));
-    actor.reach=firearm?20.f:-1.f;actor.fire=bag.weapon()==2||(firearm&&p.combat->locked_target());
+    actor.reach=firearm?20.f:-1.f;actor.fire=bag.weapon()==2||(firearm&&p.combat->locked_target(enemy_table_));
+    actor.automatic_fire=weapon_automatic_fire(bag.weapon(),collision_events_&&collision_events_->flag(1,74));
+    actor.release_trigger=p.combat->trigger_release_required()||(firearm&&!rounds&&p.combat->attacking());
     NJS_POINT3 goal{};
     const bool ordered=p.door_order&&player2_door(*p.door_order,false).has_value();
     if(p.door_order&&!ordered)p.door_order.reset();
@@ -262,7 +264,10 @@ NpcAiDecision RoomWorld::npc_ai(const NpcAiActor& actor)const{
     const bool trace=std::getenv("RECVX_AI_TRACE")!=nullptr; /* Diagnose only: candidate rejection reasons on stderr. */
     const auto reject=[&](unsigned index,const char* why){if(trace)std::fprintf(stderr,"NPCAI target %u rejected: %s\n",index,why);};
     if(!ordered&&leader_distance<=48.f&&actor.armed)for(const auto& target:combat_targets()){
-        if(target.hp<=0||recvx_enemy_is_subplayer_id(target.identity)){reject(target.index,"hp/subplayer");continue;}
+        // EN04 DamageAdd/ChgDmgMode (en04.c:696/741) and other native enemies
+        // remain alive at exactly zero HP. Their original eligibility flags
+        // still decide whether they may be attacked.
+        if(target.hp<0||recvx_enemy_is_subplayer_id(target.identity)){reject(target.index,"hp/subplayer");continue;}
         if(floor_at(target.position)!=actor.floor){reject(target.index,"floor");continue;}
         // Aim candidates can still be in their invulnerable entry/death pass.
         // weapon.c:1096's real knife eligibility must be open before engaging.
@@ -279,12 +284,14 @@ NpcAiDecision RoomWorld::npc_ai(const NpcAiActor& actor)const{
     const float distance=std::hypot(goal.x-origin.x,goal.z-origin.z);
     if(hostile&&distance<=stop){
         const int angle=recvx_subplayer_dir_target(origin.x,origin.z,actor.actor.yaw,goal.x,goal.z,32767);
-        // A new press only in the original ready stance (mode2 65); release
-        // during the swing so the next original ready state can start again.
-        // Ranged without a lock: the original re-search press (bhNextTarget, pad_ps 0x80) in the ready stance.
+        // bhCPM2_act_wpn accepts attack/search in all three ready stances
+        // (65 straight, 66 high, 67 low). Automatic weapons keep the trigger
+        // held in act_atk/act_atk_pch; their native timers govern each shot.
+        const bool ready=actor.combat_mode>=65u&&actor.combat_mode<=67u;
+        const bool firing=actor.combat_mode==69u||actor.combat_mode==169u;
         // A locked firearm leaves the body yaw to the original lock turn (yrct/ayp): no pad turn, no facing gate.
-        const bool locked=actor.reach>=0.f&&(actor.fire||actor.combat_mode==69u);
-        return {{0,locked?0:std::abs(angle)>655?(angle>0?-1:1):0,false,true,actor.fire&&(locked||std::abs(angle)<=2048)&&actor.combat_mode==65u,actor.reach>=0.f&&!actor.fire&&actor.combat_mode==65u},actor.fire?"attack":"aim",selected};
+        const bool locked=actor.reach>=0.f&&(actor.fire||firing);
+        return {{0,locked?0:std::abs(angle)>655?(angle>0?-1:1):0,false,true,actor.fire&&!actor.release_trigger&&(locked||std::abs(angle)<=2048)&&(ready||(actor.automatic_fire&&firing)),actor.reach>=0.f&&!actor.fire&&ready},actor.fire?"attack":"aim",selected};
     }
     const float probe=actor.goal_on_stairs?1.f:3.5f; // stair entries are narrow; the body pass keeps the real collision
     const auto clear=[&](NJS_POINT3 a,NJS_POINT3 b){return c2_wall_n({{a.x,a.y+8.f,a.z},{b.x,b.y+8.f,b.z},probe},0)==0;};

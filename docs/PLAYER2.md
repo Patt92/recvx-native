@@ -35,9 +35,11 @@ with its own keyboard or controller. Details, limits and validation in [NETPLAY.
 With an active partner nearby, **Shift+Tab** or **L1/LB + Inventory** (Triangle/Y
 by default) opens **ITEM EXCHANGE**. Both bags appear side by side. Left/Right
 moves through columns and across the panel edge. The window uses the original
-status-screen skin: background plate, two ItemSet grids (Player 1 at its
-original place, the partner 416 px to the left), the original item cursor,
-condition sprite, HP and item names in the message font. Confirm selects a source,
+status-screen skin: background plate, two closed ItemSet grids (Player 1 left,
+partner right), the original item cursor, condition sprite, HP and item names
+in the message font. Each frame fits its own eight- or ten-unit bag. Cursor
+markers draw over the item cells, including wide weapons and the selected source.
+The shared message panel and partner action menu occupy separate areas. Confirm selects a source,
 then a destination in the other bag; Confirm again places, stacks or swaps.
 Selecting an empty source retrieves the other item. Cancel returns to source
 selection or closes the window. Inventory or the trade chord closes it too.
@@ -127,8 +129,15 @@ row **Player AI**, `--player-ai`): no leader, so it only engages; firearms use a
 
 The AI supplies aim/attack input to the existing `CombatController` and native
 knife state machine, pose, hit capsule, damage tables and real room enemy works.
-It starts a new swing in native ready mode 65 and releases attack during the
-swing. There is no proximity damage or independent hit timer. Human Player 2
+It starts attacks in the native straight/high/low ready modes 65/66/67.
+Single-shot weapons and knife release the trigger during the attack;
+automatic weapons hold it through native firing modes 69/169. WpnTab flags
+and the burst/single selector determine the fire mode; native timers and ammo
+owners determine cadence. A completed burst or empty-magazine transition
+releases the trigger before a fresh press. The selected `src_no` remains valid after the body
+turn finishes (flag 0x100000 clears); dead targets require a new search. Living
+enemies at exactly 0 HP remain eligible, as in the original damage/death boundary.
+There is no proximity damage or independent hit timer. Human Player 2
 uses that same combat path. Linked firearm effects and secondary camera modes
 remain open. The initial weapon is a knife; supplied firearms use the partner's
 own lock table, target cycling and ammunition. An empty magazine reloads through
@@ -136,6 +145,12 @@ the original attack press (`bhCPM2_act_rld` with its animation) when the bag
 holds matching rounds; without rounds or spare rounds the NPC does not engage
 and never presses an empty trigger. A target whose joints lie below 6 units
 over its ground gets the original low aim (pad down).
+
+`build/validation/npc-combat/` records diagnostic macOS arm64 runtime checks:
+Steve's SMG produces multiple hits per attack, active RM_1000 dogs take native
+damage and die, and RM_0031 zombies grab/bite Steve above 1 HP. The reported
+unexpected invulnerability above 1 HP has not been reproduced; the intended
+held crouch at 1 HP remains separate from the active actor's damage handling.
 
 **The NPC never picks up items.** No companion command can invoke interaction,
 pickup, item granting or story tasks. This includes all key items; supplies may
@@ -303,7 +318,11 @@ wide items, equipped weapon indices, NPC restrictions, cancellation/proximity
 and immutable partners. Partner-action checks cover UI confirmation/cancel,
 weapon toggle, actual HP/poison/cap/consumption, unchanged primary ownership,
 1-HP NPC protection and normal healing for a living 1-HP human. Two SDL virtual pads verify same-device chords;
-configurations round-trip and older INIs receive defaults.
+configurations round-trip and older INIs receive defaults. Render checks exercise
+left/right bag ownership, all four cursor edges, wide-item source/destination
+markers and separation of the ten-unit bag from the message panel.
+`build/validation/trade-layout/` contains the macOS arm64 development-runtime
+views and targeted checks; no installed-app or hardware-controller claim.
 `tools/verify_trade.py --runtime <binary> --data data --output <directory>`
 checks the production modal path, both inventories, source/destination views,
 transfer/refusal, simulation hold/resume, unavailable partners and physical SDL

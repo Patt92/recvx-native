@@ -23,6 +23,15 @@ current code, working tree and installed runtime.
 
 ## Working tree and delivery
 
+**CI host-process fix (working tree):** GitHub run `42019945546` failed in
+`native/host_process.cpp`: missing `<cstring>` on Linux, unavailable spawn APIs
+on Android API 26 and unavailable spawn chdir on iOS. Explicit headers and an
+unsupported-mobile host-process branch fix these build errors; in-process NPC
+AI is unaffected. Runtime targets link on Android arm64/API 26, iOS device and
+simulator, and macOS arm64. Ubuntu 24.04 arm64/GCC 13 process smoke checks pass
+(cwd, log, exit, stop, failure); no full Linux x64 build or new GitHub run claimed.
+Evidence: `build/validation/host-process-ci/`. No commit/push or Starter-app update.
+
 **Open-mechanism sweep (2026-11-04, working tree):** 34 ledger entries closed (84.1 % -> 88.2 %, 658/746). New native owners: ranking.c ControlRanking (Task 13 after bhRankingCall, ranking screen, scores, BGM, messages) with the system save as a host file (system.rcvxsys, CONFIGFILE + Check_Sam, SysSaveHikaku), AllItemInit with the ssd_flg 0x2 rocket-launcher bonus, sys->time; terminal entry/exit fades (bhCheckSubTask 5-frame fade, monitor mode 7, sp_evt.c:764); message cursor/page arrow as font glyphs 28/29 with mes_fls blinking; player eye blinking and plp->txp[k] (EN05 corpse texture); effect links to child works via the ene[] slot (EN13 natural death); Common 7 object flr_no; item links no longer inherit the carrier visibility. Corrected: the 2026-10-23 ORIGINAL-FIX on EN03 EXP0_INT(i, 980) was wrong - the macro writes the child BH_PWORK (mode0/ct0), so the eight legs now fly in bhEne03s_MV00 after DD03/DamageInit. New ORIGINAL-FIX: bhItmSetCk out-of-range rom->etcp writes (RM_3100/3140/7030). Several entries closed by reachability evidence (script reach scan by work kind). Tests: ranking_system_save, message_blink, common25_player_motion_range, item_link_visibility, itmsetck_out_of_range, player_eye_texture, extended EN03/EN05/EN13/Common 7/terminal checks, each with a red counter-check. Full suite 264/266 (iOS bundle/HD build pre-existing). Window acceptance of the ranking screen, blinking and the terminal fade is with the user.
 
 **Player-2 companion (working tree / macOS arm64 build):** optional NPC follows and
@@ -38,6 +47,11 @@ are bound; enemy melee/grabs/bites/poison now target the nearer player through a
 per-pass target switch (`begin_enemy_pass`), EN14/EN09 player links still open.
 NPC catches up running, auto-equips received weapons and follows the used door;
 downed NPC assistance through trade/medicine is enabled (`build/validation/npc-help/`).
+NPC/Player AI now retain a valid native target after the lock turn, hold the
+trigger for automatic fire, attack/search in high/low aim and include living
+zero-HP enemies. Steve SMG/dog damage and zombie grab checks:
+`build/validation/npc-combat/`. Unexpected invulnerability above 1 HP remains
+unreproduced; the development binary contains the fixes, Start.command app unchanged.
 Save files/snapshots format 3 carry an optional two-player block (older files =
 single player); netplay reports the drifting part, drops a silent peer after 30 s and
 rejoins with the host's save image ([docs/NETPLAY.md](docs/NETPLAY.md#rejoin-after-a-drop)).
@@ -47,7 +61,10 @@ the original step actions (kdu/kdd) to follow across floors, enemy blood links
 to its tree, it speaks from its own CORE voice bank (SE bank 5), never fires an
 empty magazine (original reload with spare rounds), aims low at lying targets,
 runs from 24 units with the original pad gate (plp->flg 0x10000). The exchange
-window uses the status-screen skin with HP and condition.
+window uses the status-screen skin with HP and condition. Its corrected layout
+puts Player 1 left and the partner right, closes both bag frames and draws the
+cursor above item tiles. Development-runtime views/checks:
+`build/validation/trade-layout/`; Start.command app not replaced.
 Known: `tools/verify_enemy_ai.py` `death-1050` expects the FRONT zombie death
 by tick 1050; since a8c958a (mlwP model selection, 2026-10-22) it happens by
 1800 (bisected, same on HEAD). The expectation is a timing snapshot of the

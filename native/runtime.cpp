@@ -2263,7 +2263,9 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             const unsigned weapon=inventory.weapon();if(!weapon){player_ai_decision.action="unarmed";return;}
             const auto* slots=inventory.slots();const unsigned ammo=slots[0]?recvx::Inventory::quantity(slots[slots[0]]):0u;const bool melee=weapon==2u;
             if(!melee&&!ammo){player_ai_decision.action="no-ammo";return;}
-            recvx::NpcAiActor self{actor,world->player_floor_number(),combat.original_mode(),{},{}};self.reach=melee?-1.f:20.f;self.fire=melee||combat.locked_target();
+            recvx::NpcAiActor self{actor,world->player_floor_number(),combat.original_mode(),{},{}};self.reach=melee?-1.f:20.f;self.fire=melee||combat.locked_target(world->enemy_table());
+            self.automatic_fire=recvx::weapon_automatic_fire(weapon,events&&events->flag(1,74));
+            self.release_trigger=combat.trigger_release_required();
             player_ai_decision=world->npc_ai(self);player_ai_engaged=player_ai_decision.active();
             if(std::getenv("RECVX_AI_TRACE"))std::fprintf(stderr,"PLAYERAI mode2=%u fire=%d %s target=%d move=%d turn=%d aim=%d attack=%d next=%d\n",self.combat_mode,int(self.fire),player_ai_decision.action.c_str(),int(player_ai_decision.target),player_ai_decision.controls.move,player_ai_decision.controls.turn,int(player_ai_decision.controls.aim),int(player_ai_decision.controls.attack),int(player_ai_decision.controls.next_target)); /* Diagnose only */};
         auto player_ai_move=[&](int move){return player_ai_engaged&&!move?player_ai_decision.controls.move:move;};

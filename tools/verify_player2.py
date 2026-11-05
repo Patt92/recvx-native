@@ -85,6 +85,28 @@ def main():
     bitten = run('enemy-bite', 'local', '0 player2_position 28 0 75 0\n', frames=450, extra=bite_options, room='RM_0031.RDX')
     assert bitten['player2']['hp'] < 160 and bitten['player2']['grabs'] >= 1 and bitten['player2']['driven'], ('zombie did not grab/bite Player 2', bitten['player2'])
     assert bitten['hp'] == 160 and not bitten['player_scripted'], ('Player 1 was bitten instead', bitten['hp'])
+    steve_bitten = run('steve-npc-bite', 'npc', '0 player2_position 28 0 75 0\n', frames=900,
+                       extra=(*bite_options, '--player2-model', '12'), room='RM_0031.RDX')
+    assert steve_bitten['player2']['grabs'] >= 2 and 1 < steve_bitten['player2']['hp'] < 160, steve_bitten['player2']
+    assert steve_bitten['player2']['life'] == 0, 'Steve became inactive above the NPC incapacity floor'
+    # Real grant/exchange path: the two-cell SMG sorts before the manual, so
+    # confirm exchanges the first cell with the partner's knife.
+    smg_setup = ('0 debug_key F2\n1 debug_select give_count 300\n2 confirm\n'
+                 '3 debug_select give 2\n4 confirm\n5 debug_key F2\n'
+                 '10 trade\n11 confirm\n12 confirm\n13 trade\n')
+    smg = run('steve-smg', 'npc', smg_setup + '15 position -25 0 33.15 8192\n15 player2_position -17 0 33.15 8192\n',
+              frames=300, extra=(*fight_options, '--player2-model', '12'))
+    assert smg['player2']['hits'] > smg['player2']['attacks'] > 0, 'SMG still fires once per attack'
+    equipped = smg['player2']['items'][0]
+    assert equipped and smg['player2']['items'][equipped] >> 16 == 2
+    assert 0 < (smg['player2']['items'][equipped] & 65535) < 299, 'SMG did not consume its own ammunition'
+    dogs = run('steve-smg-dogs', 'npc', smg_setup + '15 player2_position 120 0 80 0\n',
+               frames=1200, extra=(*fight_options, '--player2-model', '12'), room='RM_1000.RDX')
+    assert dogs['player2']['hits'] > 0 and sum(e['hp'] < 0 for e in dogs['enemies'] if e['identity'] == 4) >= 2, dogs['player2']
+    dogs_live = run('steve-smg-dogs-active', 'npc', smg_setup + '15 player2_position 120 0 80 0\n',
+                    frames=1200, extra=(*bite_options, '--player2-model', '12'), room='RM_1000.RDX')
+    assert sum(e['hp'] < 0 for e in dogs_live['enemies'] if e['identity'] == 4) >= 2
+    assert 1 < dogs_live['player2']['hp'] < 160 and dogs_live['player2']['grabs'] >= 1, dogs_live['player2']
     # Save files: a two-player session is recorded (format 3) and restored by a runtime started without
     # --player2; a save without the block loads as single player.
     snaps = out / 'snaps'
@@ -131,7 +153,7 @@ def main():
     (out / 'view.bmp').unlink(missing_ok=True)
     run('view', 'local', '0 player2_keys right\n20 player2_keys forward\n40 player2_keys none\n',
         frames=40, extra=('--screenshot', str(out / 'view.bmp')))
-    print('Player 2 runtime: follow, real enemy knife damage, immutable 1-HP crouch, mortal local player, menu hold, mode switches, Player AI auto-fight/yield, enemy bite binding, dog jump reaction, stairs down/up and two-player save files PASS')
+    print('Player 2 runtime: follow, native knife/SMG damage, Steve NPC bite/release and RM_1000 dog kills with attacks enabled, 1-HP crouch, mortal local player, menu hold, Player AI fight/yield, stairs and two-player saves PASS')
 
 
 if __name__ == '__main__':

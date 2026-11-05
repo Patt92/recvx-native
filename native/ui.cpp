@@ -872,41 +872,76 @@ void GameUi::quantity(SoftwareRenderer& image,std::uint32_t packed,int x,int y,b
         ++column;drawn=true;
     }
 }
-void GameUi::draw_trade(SoftwareRenderer& image,const Inventory& primary,const Inventory& partner,bool npc,unsigned pane,std::array<unsigned,2> cells,bool selecting,unsigned source_pane,unsigned source_cell,const std::string& note)const{
-    // Host exchange window in the original status-screen skin: the settled StatusInit background (parts_05b), the
-    // ItemSet grid (parts_04b) at its original place for Player 1 and a second copy 416 px to the left for the
-    // partner, the original item cursor (parts_09b[0]), the condition sprite (parts 19) and the message font.
+void GameUi::draw_trade(SoftwareRenderer& image,const Inventory& primary,const Inventory& partner,bool npc,unsigned pane,std::array<unsigned,2> cells,bool selecting,unsigned source_pane,unsigned source_cell,const std::string& note,const std::vector<std::string>& actions,unsigned action_cursor)const{
+    // User-requested host layout, using the original status atlases. Pane indices
+    // follow inventory ownership: Player 1 on the left, partner on the right.
+    // parts_04b includes masks extending to the screen edge (entries 10/12);
+    // those are not standalone frame pieces and cannot be copied into two panes.
+    constexpr int bases[2]={84,412},grid_y=96;
+    const Inventory* inventories[2]={&primary,&partner};
     rectangle(image,0,0,640,480,0xff101010);
-    const Inventory* inventories[2]={&partner,&primary};const int shifts[2]={-416,0};const unsigned pane_of[2]={1u,0u}; // pane 0 = Player 1 (right), pane 1 = partner (left)
-    std::vector<PARTS> sprites;
-    for(unsigned i=0;parts_07b[i].anim!=-1&&parts_07b[i].anim!=255;++i){auto p=parts_07b[i];p.col.r=p.col.g=p.col.b=1.f;sprites.push_back(p);} // background plate (BGFadeIn settled)
-    for(unsigned i=0;parts_05b[i].anim!=-1&&parts_05b[i].anim!=255;++i)sprites.push_back(parts_05b[i]);
-    for(unsigned side=0;side<2;++side){const auto& inv=*inventories[side];
-        for(unsigned i=0;parts_04b[i].anim!=-1&&parts_04b[i].anim!=255;++i){auto p=parts_04b[i];if(!inv.side_pack&&(i==6||i==8||i==9||i==13||i==14))p.pos[1]-=48;p.pos[0]+=float(shifts[side]);sprites.push_back(p);}
-        PARTS c{};c.pos[0]=float(shifts[side])+96.f;c.pos[1]=-22.f;c.pos[2]=2.f;c.cen_no=5;c.parts_num=19;c.anim=int(StatusPulse::condition(inv.hp,(inv.player_stflg()&0x280000u)!=0));c.col={1,1,1,1};sprites.push_back(c);
+    auto part=[&](const NJS_TEXANIM& t,int x,int y,std::uint32_t color=0xffb2b2b2,bool flip=false){
+        blit(image,menu_[t.texid],x,y,t.sx,t.sy,t.u1,t.v1,t.u2,t.v2,color,flip);
+    };
+    for(const auto& p:parts_07b){if(p.anim==-1||p.anim==255)break;const auto& t=parts_07[p.anim];
+        for(int i=0;i<=(p.setnum&15);++i)part(t,int(p.pos[0]),int(p.pos[1]+i*p.move),0xffffffff);
     }
-    auto cell_wide=[&](const Inventory& inv,unsigned target,unsigned& first)->bool{unsigned cell=0;for(unsigned slot=2;cell<inv.capacity()&&slot<12;++slot){const auto id=Inventory::id(inv.slots()[slot]);const bool wide=id<156&&(itemdata[id].type&0x100u);const unsigned width=wide?2u:1u;if(target>=cell&&target<cell+width){first=cell;return wide;}cell+=width;}first=target;return false;};
-    auto cursor=[&](unsigned side,unsigned target,Color col){unsigned first=target;const bool wide=cell_wide(*inventories[side],target,first);auto p=parts_09b[0];p.pos[0]=float(shifts[side])+20.f+float(first%2)*68.f;p.pos[1]=4.f+float(first/2)*48.f;p.atr|=0x20;p.col=col;p.ang=wide?1:0;sprites.push_back(p);};
-    for(unsigned side=0;side<2;++side)if(pane==pane_of[side])cursor(side,cells[pane],{1,1,1,1});
-    if(selecting)for(unsigned side=0;side<2;++side)if(source_pane==pane_of[side])cursor(side,source_cell,{1,1.f,.85f,.35f});
-    std::stable_sort(sprites.begin(),sprites.end(),[](const auto& a,const auto& b){return a.pos[2]>b.pos[2];});
-    for(const auto& p:sprites){
-        if(p.parts_num>=23||!tables[p.parts_num]||p.cen_no>=12)continue;auto t=tables[p.parts_num][p.anim];if(p.parts_num==15&&p.anim==0)t.sx=p.ang?144:76;if(t.texid<0||unsigned(t.texid)>=menu_.size())continue;
-        const int nx=(p.setnum>>4)+1,ny=(p.setnum&15)+1;for(int i=0;i<std::max(nx,ny);++i)blit(image,menu_[t.texid],int(p.pos[0])+centers[p.cen_no][0]+int(std::min(i,nx-1)*p.move),int(p.pos[1])+centers[p.cen_no][1]+int(std::min(i,ny-1)*p.move),t.sx,t.sy,t.u1,t.v1,t.u2,t.v2,tint(p.col),bool(p.atr&8),0);
-    }
+    auto caption=[&](const std::string& value,int x,int y,int width,float scale,std::uint32_t color=0xffd4dba8){
+        const auto measured=label_width(value,scale);if(measured>width)scale*=float(width)/measured;
+        label(image,value,x,y,scale,color,scale);
+    };
+    caption("ITEM EXCHANGE",320-label_width("ITEM EXCHANGE",.65f)/2,10,592,.65f);
     unsigned chosen=0;
-    for(unsigned side=0;side<2;++side){const auto& inv=*inventories[side];const int base=460+shifts[side];const bool active=pane==pane_of[side];
-        ascii(image,side?"PLAYER 1":(npc?"NPC PARTNER":"PLAYER 2"),base-8,80,.6f,active?0xffffffff:0xff9a9a9a);
-        ascii(image,"HP "+std::to_string(inv.hp),base-8,102,.55f,active?0xffffffff:0xff9a9a9a);
-        unsigned cell=0;for(unsigned slot=2;cell<inv.capacity()&&slot<12;++slot){const auto packed=inv.slots()[slot];const auto id=Inventory::id(packed);const bool wide=id<156&&(itemdata[id].type&0x100u);const unsigned width=wide?2u:1u;
-            const int x=base+int(cell&1)*68,y=128+int(cell/2)*48;
-            icon(image,id,x,y);if(id){quantity(image,packed,x,y);if(inv.slots()[0]==slot)ascii(image,"E",x+2,y+2,.6f,0xff50d090);}
-            if(active&&cells[pane]>=cell&&cells[pane]<cell+width)chosen=packed;cell+=width;}
+    for(unsigned side=0;side<2;++side){const auto& inv=*inventories[side];const int x=bases[side],top=grid_y-8,rows=int(inv.capacity()/2);const bool active=pane==side;
+        // Closed frame assembled from parts_03: retain the original 68x48 item
+        // cells, 8-pixel rim and 20-pixel ITEM LIST footer. SidePackSet's lower
+        // left segment is applied symmetrically to the independent right edge.
+        for(unsigned edge=0;edge<2;++edge){const int ex=x-8+int(edge)*144;
+            part(parts_03[1],ex,top,0xffb2b2b2,edge!=0);
+            part(parts_03[2],ex,top+rows*48-32,0xffb2b2b2,edge!=0);
+            part(parts_03[4],ex,top+rows*48+28,0xffb2b2b2,edge!=0);
+        }
+        for(unsigned column=0;column<2;++column){
+            part(parts_03[6],x+int(column)*68,top);
+            part(parts_03[9],x+int(column)*68,top+rows*48+28);
+        }
+        part(parts_03[3],x,grid_y+rows*48);
+        part(parts_03[8],x+28,grid_y+rows*48);
+        part(parts_03[3],x+108,grid_y+rows*48,0xffb2b2b2,true);
+        caption(side?(npc?"NPC PARTNER":"PLAYER 2"):"PLAYER 1",x,38,136,.6f,active?0xffffffff:0xffb2b2b2);
+        caption("HP "+std::to_string(inv.hp),x,64,68,.5f,0xffd4dba8);
+        part(parts_19[StatusPulse::condition(inv.hp,(inv.player_stflg()&0x280000u)!=0)],x+68,64,0xffffffff);
+        unsigned cell=0;
+        for(unsigned slot=2;cell<inv.capacity()&&slot<12;++slot){const auto packed=inv.slots()[slot];const auto id=Inventory::id(packed);const unsigned width=id<156&&(itemdata[id].type&0x100u)?2u:1u;
+            const int ix=x+int(cell%2)*68,iy=grid_y+int(cell/2)*48;
+            icon(image,id,ix,iy);if(id){quantity(image,packed,ix,iy);if(inv.slots()[0]==slot)caption("E",ix+2,iy+2,16,.55f,0xff50d090);}
+            if(active&&cells[pane]>=cell&&cells[pane]<cell+width)chosen=packed;cell+=width;
+        }
     }
-    // Message box: the selected item's original name, the host note and the key help in the message font.
-    if(Inventory::id(chosen))text(image,read_message(messages_,4,inventory_name_id(chosen)),44,342,.95f);
-    ascii(image,note.empty()?(selecting?"OK: PLACE/STACK/SWAP  BACK: CANCEL":"OK: SELECT  LEFT/RIGHT: OTHER BAG"):note,44,392,.55f,0xffd4dba8);
-    ascii(image,"AIM: PARTNER ACTIONS  TAB: CLOSE",44,420,.55f,0xff94aca9);
+    // CursorSet / ItemSet (sub1.c:2131-2203,2453-2545): cursor z 2 is in
+    // front of the opaque item cells at z 4. Draw both selection markers after
+    // icons/quantities, with independent widths for source and destination.
+    auto cursor=[&](unsigned side,unsigned target,std::uint32_t color){
+        if(side>=2)return;const auto& inv=*inventories[side];unsigned first=0,width=1;
+        for(unsigned slot=2;slot<12&&first<inv.capacity();++slot){const auto id=Inventory::id(inv.slots()[slot]);width=id<156&&(itemdata[id].type&0x100u)?2u:1u;if(target<first+width)break;first+=width;}
+        if(first>=inv.capacity())return;auto t=parts_15[0];t.sx=width==2?144:76;
+        part(t,bases[side]-4+int(first%2)*68,grid_y-4+int(first/2)*48,color);
+    };
+    if(selecting)cursor(source_pane,source_cell,0xff999999);
+    cursor(pane,cells[pane],0xffffffff);
+    // Original message panel, widened by repeating its 28-pixel border tiles;
+    // no side masks or inventory frame may extend into this area.
+    auto background=parts_04[3];background.sx=560;part(background,40,376);
+    part(parts_04[0],24,368);part(parts_04[0],600,368,0xffb2b2b2,true);
+    for(int column=0;column<20;++column){part(parts_04[1],40+column*28,368);part(parts_04[2],40+column*28,468);}
+    if(Inventory::id(chosen))text(image,read_message(messages_,4,inventory_name_id(chosen)),44,380,.75f,0xffffffff,false,-1,.75f);
+    caption(note.empty()?(selecting?"OK: PLACE / STACK / SWAP    BACK: CANCEL":"OK: SELECT    LEFT / RIGHT: OTHER BAG"):note,44,413,548,.5f);
+    caption("AIM: PARTNER ACTIONS    INVENTORY: CLOSE",44,443,548,.5f,0xff94aca9);
+    if(!actions.empty()){
+        constexpr int x=242,y=150,width=156;const int height=int(actions.size())*32+16;
+        rectangle(image,x,y,width,height,0xff8c8a6a);rectangle(image,x+2,y+2,width-4,height-4,0xff101010);
+        for(unsigned i=0;i<actions.size();++i)caption(actions[i],x+12,y+8+int(i)*32,width-24,.6f,action_cursor==i?0xff60c0ff:0xffd8d8d8);
+    }
 }
 void GameUi::draw_box(SoftwareRenderer& image,const Inventory& inv,const StatusMenu& menu,unsigned base,unsigned index,bool selecting,const StatusSlide* slide,unsigned exit_state,unsigned note,float row_shift,unsigned arrows,unsigned cursor_cell)const{
     rectangle(image,0,0,640,480,0xff101010);
