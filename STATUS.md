@@ -42,7 +42,12 @@ Save files/snapshots format 3 carry an optional two-player block (older files =
 single player); netplay reports the drifting part, drops a silent peer after 30 s and
 rejoins with the host's save image ([docs/NETPLAY.md](docs/NETPLAY.md#rejoin-after-a-drop)).
 Enemy binding to Player 2 covers EN04 dog jumps with `bhCPM0_damage` on the
-secondary actor; dormant works (`type` != 0) keep the primary view.
+secondary actor; dormant works (`type` != 0) keep the primary view. The NPC takes
+the original step actions (kdu/kdd) to follow across floors, enemy blood links
+to its tree, it speaks from its own CORE voice bank (SE bank 5), never fires an
+empty magazine (original reload with spare rounds), aims low at lying targets,
+runs from 24 units with the original pad gate (plp->flg 0x10000). The exchange
+window uses the status-screen skin with HP and condition.
 Known: `tools/verify_enemy_ai.py` `death-1050` expects the FRONT zombie death
 by tick 1050; since a8c958a (mlwP model selection, 2026-10-22) it happens by
 1800 (bisected, same on HEAD). The expectation is a timing snapshot of the

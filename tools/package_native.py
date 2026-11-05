@@ -148,6 +148,12 @@ def main():
     shutil.copy2(ROOT / "native/third_party/stb/LICENSE", output / "STB-LICENSE.txt")
     shutil.copy2(ROOT / "docs/AUDIO.md", output / "AUDIO.md")
     shutil.copy2(ROOT / "docs/VALIDATION.md", output / "VALIDATION.md")
+    # Walkthrough for the AI-play driver (the `walkthrough` tool reads GUIDE.txt next to the runtime) and the driver itself.
+    guide = ROOT / "docs/Resident_Evil_Code_Veronica_X_Guide.txt"
+    if guide.is_file():
+        shutil.copy2(guide, output / "GUIDE.txt")
+    shutil.copytree(ROOT / "tools/agent_play", output / "tools/agent_play", ignore=shutil.ignore_patterns("__pycache__", "test_*.py"))
+    shutil.copy2(ROOT / "tools/check_no_original_core.py", output / "tools/check_no_original_core.py")
     shutil.copy2(ROOT / "docs/NATIVE_PLAYER.md", output / "NATIVE_PLAYER.md")
     shutil.copy2(ROOT / "docs/CONTROLS.md", output / "CONTROLS.md")
     shutil.copy2(ROOT / "STARTEN.md", output / "STARTEN.md")

@@ -67,6 +67,80 @@ TOOLS = [
             'what': {'type': 'string', 'enum': ['guide', 'zones', 'board', 'map', 'history', 'all']}}, 'required': ['what']}}},
 ]
 LOOKS = ('guide', 'zones', 'board', 'map', 'history', 'all')
+TOOLS.append({'type': 'function', 'function': {
+    'name': 'walkthrough',
+    'description': 'Search the complete walkthrough of the game (German). Give a few keywords: a place, an item, '
+                   'a puzzle, a boss or a room number such as RM_0050. Returns the best matching sections; '
+                   'section n returns the numbered chapter n of its table of contents. Use it when you do not '
+                   'know what to do next in an area.',
+    'parameters': {'type': 'object', 'properties': {
+        'query': {'type': 'string'}, 'section': {'type': 'integer'}}}}})
+
+
+def walkthrough_path(play_dir=None):
+    """docs/Resident_Evil_Code_Veronica_X_Guide.txt of the repository, GUIDE.txt of a package next to
+    the runtime (RECVX_GUIDE overrides both)."""
+    env = os.environ.get('RECVX_GUIDE')
+    candidates = [Path(env)] if env else []
+    candidates += [HERE.parent.parent / 'docs' / 'Resident_Evil_Code_Veronica_X_Guide.txt',
+                   HERE.parent.parent / 'GUIDE.txt']
+    if play_dir:
+        candidates.append(Path(play_dir).parent / 'GUIDE.txt')
+    for c in candidates:
+        if c.is_file():
+            return c
+    return None
+
+
+class Walkthrough:
+    """The walkthrough split into its numbered chapters and paragraphs; keyword search returns the
+    best paragraphs with their chapter title, bounded in size."""
+    def __init__(self, path):
+        self.text = path.read_text(encoding='utf-8', errors='replace') if path else ''
+        self.chapters = []  # (number, title, text)
+        current = None
+        for line in self.text.splitlines():
+            m = re.match(r'^\s*(\d{2})\s{2,}(\S.*)$', line)
+            if m and (current is None or m.group(1) != current[0]) and not line.startswith('  ' + m.group(1) + '  ') is False:
+                pass
+            m2 = re.match(r'^(\d{2})\s+(.+)$', line.strip())
+            if m2 and len(line) - len(line.lstrip()) == 0:
+                current = [m2.group(1), m2.group(2).strip(), '']
+                self.chapters.append(current)
+                continue
+            if current is not None:
+                current[2] += line + '\n'
+
+    def section(self, number):
+        for n, title, body in self.chapters:
+            if int(n) == int(number):
+                return f'{n} {title}\n' + body.strip()[:2400]
+        return 'error: no chapter ' + str(number)
+
+    def search(self, query, limit=1800):
+        words = [w.lower() for w in re.findall(r'[\wÄÖÜäöüß_]{3,}', query or '')]
+        if not words:
+            return 'error: give keywords'
+        scored = []
+        for n, title, body in self.chapters:
+            for para in re.split(r'\n\s*\n', body):
+                low = para.lower()
+                score = sum(low.count(w) for w in words) + (3 if any(w in title.lower() for w in words) else 0)
+                if score:
+                    scored.append((score, n, title, para.strip()))
+        if not scored:
+            return 'nothing found for: ' + ' '.join(words)
+        scored.sort(key=lambda s: -s[0])
+        out, used = [], 0
+        for score, n, title, para in scored[:4]:
+            chunk = f'[{n} {title}] {para}'
+            if used + len(chunk) > limit:
+                chunk = chunk[:max(0, limit - used)]
+            out.append(chunk)
+            used += len(chunk)
+            if used >= limit:
+                break
+        return '\n\n'.join(out)
 
 
 class Client:
@@ -493,6 +567,15 @@ class Driver:
                 return json.dumps(self.look(args.get('what') or 'all'), separators=(',', ':'), ensure_ascii=False)
             if name == 'zone':
                 return json.dumps(self.play.describe_zone(int(args['i'])), separators=(',', ':'))
+            if name == 'walkthrough':
+                if not getattr(self, 'walkthrough', None):
+                    path = walkthrough_path(getattr(self.play, 'directory', None))
+                    if not path:
+                        return 'error: no walkthrough file (docs/Resident_Evil_Code_Veronica_X_Guide.txt or GUIDE.txt)'
+                    self.walkthrough = Walkthrough(path)
+                if args.get('section') is not None:
+                    return self.walkthrough.section(args['section'])
+                return self.walkthrough.search(args.get('query') or '')
             if name == 'hint':
                 cmd = args.get('cmd')
                 if cmd not in HINT_CMDS:

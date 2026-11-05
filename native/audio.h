@@ -84,6 +84,11 @@ public:
     void load_room_sounds(unsigned stage,unsigned room,unsigned variant=0);
     // RequestPlayerVoiceSoundBank: CORE key player|0xfff0; the pack supplies SE bank 4.
     bool load_player_sounds(unsigned player);
+    // Host companion (PLAYER2.md): the second character's CORE voice pack in SE bank 5, which the room packs leave free;
+    // re-applied after each room pack. Returns false (and reports) when the pack is missing or bank 5 is taken.
+    bool load_companion_sounds(unsigned player);
+    void play_companion_voice(int se_no); // CallPlayerVoice on bank 5 for the companion
+    void companion_voice_off(){companion_voice_player_=-1;room_banks_.erase(5);sound_bank_packs_.erase(5);iop_.load_se_bank(5,{});}
     // sdfunc.c Set/GetRoomSoundCaseNo: consumed once by the next room bank request.
     void set_room_sound_case(unsigned variant){room_sound_case_=variant;}
     unsigned take_room_sound_case(){const auto value=room_sound_case_;room_sound_case_=0;return value;}
@@ -137,6 +142,7 @@ public:
     void stop_voice(unsigned fade_ticks);
     // sdfunc.c CallPlayerVoice: slot 7, bank (SeNo/256)&0xF, list SeNo. Undecodable programs are reported, never fatal.
     void play_player_voice(int se_no);
+    int companion_voice_player_=-1;
     // sdfunc.c:2371 ExecEnemySeManager; collision is the room's CheckCollision4Sound(CameraPos, pPos): 0 or -0x1C.
     void exec_enemy_se(const std::function<int(SoundPoint camera,SoundPoint source)>& collision={});
     bool footstep(unsigned floor,unsigned type,unsigned actor,bool enabled,SoundPoint position,bool syukan=false);

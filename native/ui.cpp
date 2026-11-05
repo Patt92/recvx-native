@@ -873,35 +873,40 @@ void GameUi::quantity(SoftwareRenderer& image,std::uint32_t packed,int x,int y,b
     }
 }
 void GameUi::draw_trade(SoftwareRenderer& image,const Inventory& primary,const Inventory& partner,bool npc,unsigned pane,std::array<unsigned,2> cells,bool selecting,unsigned source_pane,unsigned source_cell,const std::string& note)const{
-    rectangle(image,0,0,image.width(),image.height(),0xff090f12);
-    const int origin=std::max(0,(image.width()-640)/2);
-    label(image,"ITEM EXCHANGE",origin+24,18,.85f,0xffdbe9df,.85f);
-    label(image,selecting?"Choose a destination":"Choose an item",origin+26,52,.5f,0xff91b6b7,.5f);
-    const Inventory* inventories[]={&primary,&partner};
-    for(unsigned side=0;side<2;++side){
-        const auto& inventory=*inventories[side];const int left=origin+24+int(side)*304;
-        rectangle(image,left-2,88,288,300,pane==side?0xff355d65:0xff26343a);
-        rectangle(image,left,90,284,296,0xff101c22);
-        label(image,side?(npc?"NPC PARTNER":"PLAYER 2"):"PLAYER 1",left+12,96,.6f,pane==side?0xffe0ebbb:0xffa6b7b6,.6f);
-        label(image,"HP "+std::to_string(inventory.hp)+"  "+(inventory.infected?std::string("Infected"):inventory.condition())+"  SPACE "+std::to_string(inventory.occupied())+"/"+std::to_string(inventory.capacity()),left+12,126,.4f,0xff9fb6b1,.4f);
-        unsigned cell=0,chosen=0;
-        for(unsigned slot=2;cell<inventory.capacity()&&slot<12;++slot){
-            const auto packed=inventory.slots()[slot];const auto id=Inventory::id(packed);const bool wide=id<156&&(itemdata[id].type&0x100u);const unsigned width=wide?2u:1u;
-            const int x=left+12+int(cell%2)*130,y=154+int(cell/2)*44,w=int(width)*130-4;
-            const bool selected=cells[side]>=cell&&cells[side]<cell+width;
-            const bool source=selecting&&side==source_pane&&source_cell>=cell&&source_cell<cell+width;
-            const auto border=source?0xffd4b95f:pane==side&&selected?0xffa2dadd:0xff31464b;
-            rectangle(image,x,y,w,42,border);rectangle(image,x+2,y+2,w-4,38,0xff17262c);
-            if(id&&id<156){const int icon_width=wide?112:56;icon(image,id,x+(w-icon_width)/2,y+1,38,56);quantity(image,packed,x+w-44,y+1,true);}
-            if(slot==inventory.slots()[0]&&id)label(image,"E",x+4,y+1,.4f,0xffd5dba5,.4f);
-            if(selected)chosen=id;cell+=width;
-        }
-        std::string name=chosen?item_name(chosen):"Empty";
-        while(!name.empty()&&label_width(name,.46f)>260)name.pop_back();
-        label(image,name,left+12,394,.46f,0xffdbe9df,.46f);
+    // Host exchange window in the original status-screen skin: the settled StatusInit background (parts_05b), the
+    // ItemSet grid (parts_04b) at its original place for Player 1 and a second copy 416 px to the left for the
+    // partner, the original item cursor (parts_09b[0]), the condition sprite (parts 19) and the message font.
+    rectangle(image,0,0,640,480,0xff101010);
+    const Inventory* inventories[2]={&partner,&primary};const int shifts[2]={-416,0};const unsigned pane_of[2]={1u,0u}; // pane 0 = Player 1 (right), pane 1 = partner (left)
+    std::vector<PARTS> sprites;
+    for(unsigned i=0;parts_07b[i].anim!=-1&&parts_07b[i].anim!=255;++i){auto p=parts_07b[i];p.col.r=p.col.g=p.col.b=1.f;sprites.push_back(p);} // background plate (BGFadeIn settled)
+    for(unsigned i=0;parts_05b[i].anim!=-1&&parts_05b[i].anim!=255;++i)sprites.push_back(parts_05b[i]);
+    for(unsigned side=0;side<2;++side){const auto& inv=*inventories[side];
+        for(unsigned i=0;parts_04b[i].anim!=-1&&parts_04b[i].anim!=255;++i){auto p=parts_04b[i];if(!inv.side_pack&&(i==6||i==8||i==9||i==13||i==14))p.pos[1]-=48;p.pos[0]+=float(shifts[side]);sprites.push_back(p);}
+        PARTS c{};c.pos[0]=float(shifts[side])+96.f;c.pos[1]=-22.f;c.pos[2]=2.f;c.cen_no=5;c.parts_num=19;c.anim=int(StatusPulse::condition(inv.hp,(inv.player_stflg()&0x280000u)!=0));c.col={1,1,1,1};sprites.push_back(c);
     }
-    label(image,note.empty()?(selecting?"OK: place / stack / swap    Back: cancel selection":"OK: select    Left/Right: move between inventories"):note,origin+26,426,.43f,0xffd4dba8,.43f);
-    label(image,"Aim: partner item actions    Inventory / Trade: close",origin+26,454,.4f,0xff94aca9,.4f);
+    auto cell_wide=[&](const Inventory& inv,unsigned target,unsigned& first)->bool{unsigned cell=0;for(unsigned slot=2;cell<inv.capacity()&&slot<12;++slot){const auto id=Inventory::id(inv.slots()[slot]);const bool wide=id<156&&(itemdata[id].type&0x100u);const unsigned width=wide?2u:1u;if(target>=cell&&target<cell+width){first=cell;return wide;}cell+=width;}first=target;return false;};
+    auto cursor=[&](unsigned side,unsigned target,Color col){unsigned first=target;const bool wide=cell_wide(*inventories[side],target,first);auto p=parts_09b[0];p.pos[0]=float(shifts[side])+20.f+float(first%2)*68.f;p.pos[1]=4.f+float(first/2)*48.f;p.atr|=0x20;p.col=col;p.ang=wide?1:0;sprites.push_back(p);};
+    for(unsigned side=0;side<2;++side)if(pane==pane_of[side])cursor(side,cells[pane],{1,1,1,1});
+    if(selecting)for(unsigned side=0;side<2;++side)if(source_pane==pane_of[side])cursor(side,source_cell,{1,1.f,.85f,.35f});
+    std::stable_sort(sprites.begin(),sprites.end(),[](const auto& a,const auto& b){return a.pos[2]>b.pos[2];});
+    for(const auto& p:sprites){
+        if(p.parts_num>=23||!tables[p.parts_num]||p.cen_no>=12)continue;auto t=tables[p.parts_num][p.anim];if(p.parts_num==15&&p.anim==0)t.sx=p.ang?144:76;if(t.texid<0||unsigned(t.texid)>=menu_.size())continue;
+        const int nx=(p.setnum>>4)+1,ny=(p.setnum&15)+1;for(int i=0;i<std::max(nx,ny);++i)blit(image,menu_[t.texid],int(p.pos[0])+centers[p.cen_no][0]+int(std::min(i,nx-1)*p.move),int(p.pos[1])+centers[p.cen_no][1]+int(std::min(i,ny-1)*p.move),t.sx,t.sy,t.u1,t.v1,t.u2,t.v2,tint(p.col),bool(p.atr&8),0);
+    }
+    unsigned chosen=0;
+    for(unsigned side=0;side<2;++side){const auto& inv=*inventories[side];const int base=460+shifts[side];const bool active=pane==pane_of[side];
+        ascii(image,side?"PLAYER 1":(npc?"NPC PARTNER":"PLAYER 2"),base-8,80,.6f,active?0xffffffff:0xff9a9a9a);
+        ascii(image,"HP "+std::to_string(inv.hp),base-8,102,.55f,active?0xffffffff:0xff9a9a9a);
+        unsigned cell=0;for(unsigned slot=2;cell<inv.capacity()&&slot<12;++slot){const auto packed=inv.slots()[slot];const auto id=Inventory::id(packed);const bool wide=id<156&&(itemdata[id].type&0x100u);const unsigned width=wide?2u:1u;
+            const int x=base+int(cell&1)*68,y=128+int(cell/2)*48;
+            icon(image,id,x,y);if(id){quantity(image,packed,x,y);if(inv.slots()[0]==slot)ascii(image,"E",x+2,y+2,.6f,0xff50d090);}
+            if(active&&cells[pane]>=cell&&cells[pane]<cell+width)chosen=packed;cell+=width;}
+    }
+    // Message box: the selected item's original name, the host note and the key help in the message font.
+    if(Inventory::id(chosen))text(image,read_message(messages_,4,inventory_name_id(chosen)),44,342,.95f);
+    ascii(image,note.empty()?(selecting?"OK: PLACE/STACK/SWAP  BACK: CANCEL":"OK: SELECT  LEFT/RIGHT: OTHER BAG"):note,44,392,.55f,0xffd4dba8);
+    ascii(image,"AIM: PARTNER ACTIONS  TAB: CLOSE",44,420,.55f,0xff94aca9);
 }
 void GameUi::draw_box(SoftwareRenderer& image,const Inventory& inv,const StatusMenu& menu,unsigned base,unsigned index,bool selecting,const StatusSlide* slide,unsigned exit_state,unsigned note,float row_shift,unsigned arrows,unsigned cursor_cell)const{
     rectangle(image,0,0,640,480,0xff101010);

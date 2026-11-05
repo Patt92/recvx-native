@@ -649,7 +649,7 @@ void RoomWorld::bind_enemy_services(){
         enemy_world->audio_.request_enemy_se(enemy,{p->x,p->y,p->z},se,1,0);};
     s.enemy_se_ex=[](uint32_t enemy,const RECVX_ENEMY_VEC* p,int se,int fade){enemy_world->audio_.request_enemy_se(enemy,{p->x,p->y,p->z},se,1,fade);};
     s.enemy_se_playing=[](uint32_t enemy,int se)->int{return enemy_world->audio_.enemy_se_playing(enemy,se)?1:0;};
-    s.player_voice=[](int se){enemy_world->audio_.play_player_voice(se);};
+    s.player_voice=[](int se){if(enemy_world->enemy_target_==1u)enemy_world->audio_.play_companion_voice(se);else enemy_world->audio_.play_player_voice(se);};
     // zonzon1.c:391 -> bhSetBloodPoolLnk, palette = BloodType[id].color.
     s.blood_pool=[](RECVX_ENEMY_WORK* w,const RECVX_ENEMY_VEC* p,int ay,const RECVX_ENEMY_BP_WORK* param){
         if(w->id>=31){enemy_world->unbound_enemy_.insert("bhEne_BloodPool: BloodType[id] ausserhalb");return;}
@@ -1527,7 +1527,7 @@ int RoomWorld::effect_tb(unsigned flg,int id,int type,unsigned mdlver,NJS_POINT3
     EffectSpawn e;e.flg=flg;e.id=unsigned(id);e.type=unsigned(type);e.mdlver=mdlver;e.position=position;e.scale=scale;e.ax=ax;e.ay=ay;e.lkono=lkono;
     if(ofs){e.has_offset=true;e.offset={ofs->x,ofs->y,ofs->z};}
     unsigned kind=0,index=0;
-    if(link_player)kind=1;
+    if(link_player){kind=1;index=enemy_target_==1u?1u:0u;} /* link kind 0 index 1 = the Player 2 extension's tree */
     else if(link_w){if(enemy_work_index(link_w,index))kind=2;else if(enemy_work_slot(link_w,index))kind=kEnemySlotLink+1;
         else{unbound_enemy_.insert("bhSetEffectTb: Linkwork ohne ene[]-Platz");return -1;}e.linked_work=link_w;}
     return spawn_effect(e,kind,index);

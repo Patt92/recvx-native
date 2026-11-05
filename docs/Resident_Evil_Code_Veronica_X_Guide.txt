@@ -1,0 +1,1569 @@
+RESIDENT EVIL CODE: VERONICA X
+========================================
+DEUTSCHE KOMPLETTLÖSUNG | HAUPTSPIEL VON ANFANG BIS ENDE
+Ausführlicher Wegführer mit Rätseln, Abzweigungen, Bossen und Warnungen
+Stand: November 2026
+
+============================================================
+INHALTSVERZEICHNIS
+============================================================
+  00  So benutzt du diese Komplettlösung
+  01  Spielregeln, Ausrüstung und die größten Fallen
+  02  CLAIRE: Gefängnis auf Rockfort Island
+  03  CLAIRE: Palast, U-Boot und Flughafen (erste Besuche)
+  04  CLAIRE: Militärische Ausbildungsanlage und Steve
+  05  CLAIRE: Rückwege, Porträträtsel und Privatresidenz
+  06  CLAIRE: Gefängnis-Nebenweg, Musikrätsel und Flucht
+  07  CLAIRE: Flughafen, Tyrant und Flugzeug
+  08  CLAIRE: Antarktis und Nosferatu
+  09  CHRIS: Rückkehr nach Rockfort Island
+  10  CHRIS: Labor, Flughafen und Abflug
+  11  CHRIS: Antarktis, Magnum und Ameisenlabor
+  12  CLAIRE: Letzter spielbarer Abschnitt und Steve
+  13  CHRIS: Drei Edelsteine, Libelle und Finale
+  14  Rätsel-Schnellübersicht
+  15  Entscheidungen, Abzweigungen und optionale Funde
+  16  Bosskampf-Kurzreferenz
+  17  Checklisten gegen verpasste Gegenstände
+  18  Fehlerbehebung: Wenn du festhängst
+  19  Quellen und Versionshinweise
+
+============================================================
+00 | SO BENUTZT DU DIESE KOMPLETTLÖSUNG
+============================================================
+
+Diese Lösung beschreibt die Story von Resident Evil CODE: Veronica X,
+nicht nur einzelne Rätsel. Sie ist auf einen entspannten ersten
+Spieldurchlauf ausgelegt, bei dem du speichern und Gegenstände einsammeln
+kannst. Die Kapitel folgen der Spielreihenfolge. Eine spätere Rückkehr
+in bereits bekannte Bereiche ist normal.
+
+Bezeichnungen:
+  PFLICHT      = Zum Weiterspielen notwendig.
+  EMPFOHLEN    = Nicht zwingend, aber sehr hilfreich.
+  OPTIONAL     = Zusätzlicher Fund, Umweg oder Bonus.
+  WARNUNG      = Eine irreversible Entscheidung oder gefährliche Stelle.
+  ABZWEIGUNG   = Du hast mehrere sinnvolle Wege oder Reihenfolgen.
+  ITEMBOX      = Gemeinsame Gegenstandskiste. Diese teilst du auch mit
+                 dem anderen Hauptcharakter.
+
+Raumnamen können je nach Sprache und Version variieren. Daher stehen
+bei besonderen Gegenständen auch die englischen Inventarnamen dabei.
+Die Richtungsangaben beziehen sich auf die genannten Räume bzw.
+Treppen, nicht immer auf die wechselnde Kameraperspektive.
+
+Wenn du einen Schritt bereits erledigt hast, überspringe ihn einfach.
+Durchsuche vor allem Schreibtische, Regale, Leichen, Behälter und
+leuchtende Gegenstände. Viele Aufgaben erfordern das UNTERSUCHEN oder
+DREHEN eines Gegenstands im Inventar, nicht nur seine Aufnahme.
+
+============================================================
+01 | SPIELREGELN UND DIE GRÖSSTEN FALLEN
+============================================================
+
+01.1  INVENTAR UND ITEMBOX
+--------------------------
+- Die Itemboxen sind miteinander verbunden. Waffen und Munition, die
+  Claire dort hinterlässt, kann Chris später benutzen.
+- Gegenstände, die Claire bei einem endgültigen Charakterwechsel noch
+  im persönlichen Inventar hat, sind Chris nicht einfach verfügbar.
+- Schlüsselgegenstände nach Gebrauch nur dann wegwerfen, wenn das Spiel
+  ausdrücklich meldet, dass sie nicht mehr benötigt werden.
+- Untersuche Koffer, Vasen, Schmuck, Töpfe und Briefe im Inventar.
+- Lass immer ein bis drei Plätze für neue Storygegenstände frei.
+- Sammle die Side Packs für zusätzliche Inventarplätze ein.
+
+01.2  DIE WICHTIGSTEN WARNUNGEN
+------------------------------
+WARNUNG A: Bewahre den LEEREN FEUERLÖSCHER auf! Wenn Claire das Feuer
+am Friedhof gelöscht hat, bleibt ein leerer Feuerlöscher übrig.
+Lege ihn in eine normale ITEMBOX. Chris kann ihn später in der
+Antarktis wieder auffüllen und erhält damit Zugang zur Magnum.
+Er darf nicht dauerhaft in einem nicht mehr erreichbaren Metalldetektor-
+Ablagefach liegen bleiben.
+
+WARNUNG B: Hol das BLUTSTILLENDE MITTEL (Hemostatic) aus dem
+Speicherraum der Ausbildungsanlage und bring es als Claire zu
+Rodrigo in die Anfangszelle. Dafür gibt es den DIETRICH (Lockpick).
+Diese Gelegenheit endet mit Claires endgültiger Flucht von der Insel.
+
+WARNUNG C: Hebe EXPLOSIVE PFEILE für den Flugzeug-Tyrant auf.
+Normale Pistolenmunition kann im restlichen Spiel großzügiger verwendet
+werden. Die zweite Tyrant-Begegnung ist ein häufiger Engpass.
+
+WARNUNG D: Vor Nosferatu die wichtigsten Vorräte für Chris in die
+Itembox legen. Vor Claires letztem kurzen Abschnitt in der Antarktis
+auch an IHRE eigene Heilung denken.
+
+WARNUNG E: Der STEVE-Verfolger im letzten Spielteil wird NICHT bekämpft.
+Du musst wegrennen; ausreichend Heilung ist entscheidend.
+
+WARNUNG F: Wenn du den Battle Game später vollständig spielen willst,
+löse als Chris auf Rockfort das Schubladenrätsel und nimm die
+LUGER-NACHBILDUNG mit. Es ist für den normalen Abspann nicht nötig.
+
+01.3  ALLGEMEINE KAMPFREGELN
+----------------------------
+- Nicht jeden Zombie töten. In einem einmalig besuchten Gang ist
+  Vorbeilaufen oft besser.
+- Lieber Kräuter mischen, statt einzelne Plätze zu belegen.
+- Das Messer ist stark, aber riskant. Nur gegen isolierte, gut
+  kontrollierbare Gegner einsetzen.
+- Fledermäuse meiden das angezündete Feuerzeug.
+- Gegen Hunde in engen Bereichen früh zielen oder schnell passieren.
+- Bandersnatches können mit ihrem langen Arm aus großer Distanz treffen.
+  Explosive Pfeile, M-100P und Granatwerfer sind geeignete Antworten.
+- Bei Hunters/Sweepers Abstand halten, Hindernisse nutzen und Gift
+  schnell mit blauen Kräutern beseitigen.
+- Speichere für einen normalen Durchlauf vor Bossen und
+  unübersichtlichen Rückwegen. Für einen A-Rang gelten andere Regeln.
+
+============================================================
+02 | CLAIRE: GEFÄNGNIS AUF ROCKFORT ISLAND
+============================================================
+
+02.1  ZELLE, FRIEDHOF UND STEVE
+------------------------------
+ 1. Du beginnst in einer dunklen Gefängniszelle. Benutze das
+    FEUERZEUG. Rodrigo lässt dich gehen. Nimm im Zellenbereich
+    das MESSER, Munition, Kräuter und ggf. Farbbänder mit.
+ 2. Steige die Treppe hinauf, bis du den regnerischen Friedhof
+    erreichst. Am brennenden Fahrzeug liegt ein wichtiger Koffer.
+    Du kannst ihn JETZT noch nicht erreichen. Merke dir den Ort.
+ 3. Laufe durch die Zombies zum anderen Ende des Friedhofs und
+    verlasse ihn durch die Tür.
+ 4. Nach der Szene mit Steve erhältst du die M93R-PISTOLE.
+    Untersuche den Bereich beim Jeep auf Pistolenmunition.
+ 5. Die große Doppeltür beim Jeep ist zunächst verschlossen.
+    Nimm die kleinere Metalltür zu den Gefangenenbaracken.
+
+02.2  GEFANGENENBARACKEN
+-----------------------
+ 6. Folge dem Holzweg und sammle das grüne Kraut ein. Im Gebäude
+    stehen mehrere Zombies. Umgehe sie oder schalte sie einzeln aus.
+ 7. Durchsuche Küche, Tisch, Regal und Schlafraum. Hier findest du
+    Munition, Kräuter, eine Gebietskarte und das Prisoner's Diary.
+ 8. Im Schlafraum bricht ein Zombie durch das Fenster. Nach dem
+    Kampf kannst du die DOPPELPISTOLEN M-100P aufnehmen.
+    EMPFOHLEN: Sie helfen später bei Bandersnatches.
+ 9. Verlasse das Gebäude, folge draußen dem Weg um das Haus und
+    weiter zum umzäunten Hof. Hinter einem Gitter steht eine
+    Guillotine. Diesen Bereich erreichst du gleich von der anderen
+    Seite. Folge zunächst der Tür zum Sicherheitsgebäude.
+
+02.3  METALLDETEKTOR UND 3D-GERÄT
+--------------------------------
+10. Vor dem Metalldetektor musst du ALLE metallischen Gegenstände
+    in das Ablagefach legen. Auch Feuerzeug, Waffen und später
+    gefundene Metallobjekte können den Alarm auslösen.
+11. Durchquere den Sicherheitskorridor bis zum zweiten Ablagefach.
+    Betritt den Arbeitsraum mit dem 3D-Kopiergerät. Nimm dort
+    die erreichbaren Gegenstände und Hinweise mit, aber beachte:
+    Vor dem Zurückgehen müssen neue Metallobjekte erneut in die
+    Ablage gelegt werden.
+12. Betritt die benachbarte Überwachungszentrale, in der Steve
+    am Computer steht. Untersuche nach der Szene den Schreibtisch:
+    Im Fach ist das FALKENEMBLEM (Hawk Emblem).
+13. Betätige den Schalter, der draußen den Zugang zum Hinrichtungs-
+    hof entriegelt.
+14. Lege das originale Falkenemblem in die 3D-Scanvorrichtung,
+    damit seine Form gespeichert wird. Für die Kopie fehlt dir
+    noch das Spezialmaterial TG-01.
+15. Räume die neuen Metallobjekte in die sichere Ablage.
+    Nimm aus dem ersten Fach deine ursprüngliche Ausrüstung zurück.
+
+02.4  FEUERLÖSCHER, TG-01 UND TOR ZUM PALAST
+-------------------------------------------
+16. Gehe zum Hof mit Guillotine und dem zuvor versperrten
+    Rolltor. Öffne das Rolltor mit dem freigeschalteten Schalter.
+    Zombies greifen an; ein explosives Fass erleichtert den Kampf.
+17. Nimm im Hinrichtungshof den FEUERLÖSCHER (Extinguisher).
+    Suche nahe der Guillotine den kleinen VORHÄNGESCHLOSS-SCHLÜSSEL
+    (Padlock Key). Damit lässt sich eine Abkürzung zum Barackenhof
+    freischalten. OPTIONAL, aber empfehlenswert.
+18. Kehre zum Friedhof vom Spielbeginn zurück. Lösche den Brand
+    am Fahrzeug. Nimm den jetzt erreichbaren KOFFER (Briefcase).
+19. Untersuche den Koffer im Inventar und hole das Material TG-01
+    heraus. Der Koffer enthält außerdem einen Hinweis über das
+    metalldetektorfreundliche Spezialmaterial.
+20. WARNUNG: Der jetzt LEERE FEUERLÖSCHER darf nicht entsorgt
+    oder vergessen werden. Trage ihn zurück und lege ihn so bald
+    wie möglich in eine erreichbare normale Itembox.
+21. Geh erneut zum Sicherheitsgebäude mit den zwei Ablagefächern.
+    Bringe das TG-01 zum 3D-Gerät. Stelle mithilfe des zuvor
+    gescannten Falkenemblems eine Kopie her.
+22. Nimm die KOPIE DES FALKENEMBLEMS (Special Alloy Emblem) mit.
+    Sie passiert den Metalldetektor. Hol danach deine Ausrüstung
+    aus den Ablagefächern zurück.
+23. Geh zur großen Doppeltür beim Jeep und setze die Emblemkopie
+    dort ein. Der Weg zum Palast ist frei.
+24. Folge der Brücke. Schiebe den beweglichen Container so, dass
+    die Flammen blockiert werden und du vorbeikommst. Steige die
+    Metalltreppen hoch und gehe durch das geschwungene Tor.
+
+ABZWEIGUNG NACH SCHRITT 17:
+  A (empfohlen): Erst den Schlüssel an der Gitterabkürzung nutzen,
+    anschließend auf direktem Weg zum Friedhof und zum 3D-Gerät.
+  B (ebenfalls möglich): Ohne die Abkürzung zurücklaufen. Die
+    Hauptgeschichte ändert sich nicht, der Weg ist nur länger.
+
+============================================================
+03 | CLAIRE: PALAST, U-BOOT UND FLUGHAFEN
+============================================================
+
+03.1  VORHOF UND EINGANGSHALLE DES PALASTS
+-----------------------------------------
+ 1. Im Vorhof greifen Hunde an. Sammle auf dem Boden das grüne
+    MARINE-ABZEICHEN (Navy Proof) ein. Das ist das erste von drei
+    Abzeichen für das Flugzeug. Hebe es unbedingt auf.
+ 2. Betritt den Palast. Die große Eingangshalle führt nach oben
+    zu einem Speicher-/Sekretariatszimmer. Gehe zuerst dorthin.
+ 3. Durchsuche das Zimmer und nutze die Itembox. Schiebe den
+    Schrank bei der Tür mit den zwei goldenen Pistolen beiseite.
+    Darunter liegt eine ID-KARTE (ID Card).
+ 4. Untersuche die Rückseite der Karte im Inventar. Der Code ist
+    NTC0394. Gib ihn unten am Terminal in der Eingangshalle ein.
+    Dadurch öffnet sich die computerverriegelte Tür im Erdgeschoss.
+ 5. OPTIONAL: Im Badezimmer findest du mit dem Feuerzeug eine
+    gefahrlosere Passage an den Fledermäusen vorbei. Nimm den
+    Duraluminiumkoffer mit; öffnen kannst du ihn erst mit Dietrich.
+    Lege ihn bei Platzmangel in der Itembox ab.
+
+03.2  GEHEIMRAUM UND DIE GOLDENEN LUGERS
+---------------------------------------
+ 6. Geh durch die mit NTC0394 entsperrte Tür in den rückwärtigen
+    Palastbereich. Besiege oder umgehe die Zombies und steige in
+    den Raum mit der großen Ameisenfigur und dem Schaltpult hinab.
+ 7. Betätige den Schalter bei der Ausstellungsfigur. Ein geheimer
+    Bereich wird zugänglich. Nimm dort das STEUERRAD (Steering Wheel).
+ 8. Verlasse den Bereich und versuche, den Palast zu verlassen.
+    Du hörst Steve um Hilfe rufen: Er ist in der Falle der
+    GOLDENEN LUGERS gefangen.
+ 9. Kehre sofort in den Ausstellungsraum zurück. Wähle an der
+    Steuerung die Buchstaben C und E und bestätige (Decide).
+    Dadurch wird Steve befreit. Die schnelle Lösung ist für den
+    A-Rang relevant.
+10. Nach den Szenen kannst du den Palast zunächst verlassen.
+
+03.3  U-BOOT-DOCK: ZUERST ZUM FLUGHAFEN
+--------------------------------------
+11. Draußen am Palast nimmst du die Treppe zum U-Boot-Dock hinab.
+    Benutze das STEUERRAD am Mechanismus, um das U-Boot zugänglich
+    zu machen.
+12. Steige in das U-Boot. EMPFOHLEN: Vor dem Abtauchen das
+    SIDE PACK einsammeln. Es erweitert Claires Inventar um
+    zwei zusätzliche Plätze.
+13. Betätige die Steuerung und tauche ab. Verlasse das U-Boot,
+    durchquere den Gang und erreiche den Flughafenbereich.
+14. Im Flughafenbüro kannst du Munition aufnehmen. Folge von dort
+    zur großen Lagerhalle. Benutze den kleinen Lift, um an die
+    Kransteuerung auf der oberen Ebene zu gelangen.
+15. Hebe mit dem Kran die störende Kiste weg. Kehre nach unten
+    zurück und bediene das freigelegte Pult. Mehrere Zombies
+    stehen auf. Nimm auf der Frachtplattform die BIOHAZARD-KARTE
+    (Biohazard Card) mit.
+16. Im Raum am Aquarium kann eine Plattform mit drei Einlassungen
+    aktiviert werden. Hier gehören SPÄTER Navy, Army und Air
+    Force Proof hinein. Du kannst das Navy Proof jetzt einsetzen
+    oder es zunächst in der Itembox aufbewahren.
+17. Geh über das U-Boot zurück zum Palast und von dort zur
+    militärischen Ausbildungsanlage. Du brauchst die Biohazard-
+    Karte dort, um die nächsten Bereiche freizuschalten.
+
+ABZWEIGUNG BEI DEN DREI ABZEICHEN:
+  A: Navy Proof jetzt am Flughafen einlegen. So sparst du
+     später Inventarplatz.
+  B: Alle drei Proofs bis zum gemeinsamen Einsetzen aufbewahren.
+     Beide Varianten funktionieren. Wir folgen im Rest der Lösung
+     Variante A, die anderen beiden kommen später dazu.
+
+============================================================
+04 | CLAIRE: AUSBILDUNGSANLAGE UND STEVE
+============================================================
+
+04.1  WURMPLATZ, EINGANG UND ARMBRUST
+------------------------------------
+ 1. Auf dem Vorplatz erscheint der GULP WORM. Hier musst du ihn
+    als Claire nicht besiegen. Laufe schnell zur großen Doppeltür
+    der Ausbildungsanlage.
+ 2. In der Eingangshalle gehst du oben in den Raum mit Sicht
+    zum Labor. Dort liegt die ARMBRUST (Bow Gun). Nimm sie.
+ 3. Eine Szene mit dem Sicherheitslabor folgt. Merke dir das
+    Gemälde an der gegenüberliegenden Wand, das du später
+    holen musst. Jetzt wird der Bereich zunächst gesperrt.
+ 4. Gehe wieder in die Eingangshalle, dann in die Umkleide und
+    weiter ins Bad mit Schwimmbecken. Drehe das Wasserventil
+    am Becken zu und nimm den jetzt erreichbaren LAGERSCHLÜSSEL
+    (Storage Key) aus dem Wasser.
+ 5. Im Büro der Eingangsebene ist ein Schrank, den du mit
+    diesem Schlüssel öffnen kannst. Darin liegt Pulver für
+    EXPLOSIVE ARMBRUSTPFEILE. Bewahre einen großen Vorrat
+    davon für den Tyrant auf.
+ 6. Verwende die BIOHAZARD-KARTE für die elektrische Tür zum
+    Hof der Ausbildungsanlage.
+
+04.2  ALFREDS BESCHUSS UND BLUTSTILLENDES MITTEL
+-----------------------------------------------
+ 7. Im Hof schießt Alfred auf Claire. Bleibe nicht stehen,
+    laufe an der Wand entlang die Treppen hoch und folge
+    seinem Fluchtweg.
+ 8. Nimm oben die Tür beim Getränkeautomaten und anschließend
+    den dortigen Speicherraum.
+ 9. PFLICHT FÜR DEN EMPFOHLENEN WEG: Auf dem Sofa des
+    Speicherraums liegt BLUTSTILLENDES MITTEL (Hemostatic).
+    Nimm es sofort mit oder lege es in eine Itembox.
+10. Am benachbarten Ausgang wartet Alfreds nächste Falle.
+    Gehe in den Lager-/Kampfbereich. Nimm die dort liegenden
+    zwei INGRAM-MASCHINENPISTOLEN auf, bevor du die Treppe
+    hinuntergehst.
+11. Erledige den Bandersnatch. Mit M-100P oder explosiven
+    Pfeilen geht das zügig. Folge dem freigelegten Weg.
+12. Steve greift in der nächsten Szene ein. Claire übergibt
+    ihm die Ingrams und bekommt von ihm die GOLDENEN LUGERS.
+    Diese dienen Claire später als Türschlüssel, nicht als
+    reguläre Waffe.
+
+04.3  KURZ ALS STEVE SPIELEN
+---------------------------
+13. Sobald du Steve steuern darfst, kannst du OPTIONAL sofort
+    durch die Tür hinter dir zu Claire zurücklaufen. Das
+    löst eine kurze besondere Szene bzw. ein Achievement aus.
+14. Folge dann Steves Route durch die Räume mit Zombies.
+    Die Ingrams haben für diesen Abschnitt genügend Munition.
+15. Nutze die Türen und Treppen, bis du Claire wiedertriffst.
+    Die Sequenz mit Steves Vater gehört zur Handlung. Danach
+    übernimmst du wieder Claire.
+
+04.4  ADLERPLATTE, EMBLEMKARTE UND GRANATWERFER
+----------------------------------------------
+16. Erkunde den Bereich bei der Garage und dem Diorama-Raum
+    (Raum mit dem Modell der Ausbildungsanlage).
+17. Im Diorama-/Speicherraum liegt eine ADLERPLATTE
+    (Eagle Plate). Nimm sie mit.
+18. Gehe aus dem Gebäude durch den Hof zur kleinen oberen
+    Steinvertiefung auf dem Balkon, an dem Alfred vorher
+    geschossen hat. Setze die Adlerplatte ein.
+19. Du erhältst die EMBLEMKARTE (Emblem Card).
+20. Steige durch den Außenschacht und die Leiter in die
+    unterirdischen Teile der Anlage ab. Öffne die elektronisch
+    gesicherten Tore mit der Emblemkarte.
+21. Erreiche den abgetrennten Lagerraum und nimm den
+    GRANATWERFER (Grenade Launcher) mit. EMPFOHLEN:
+    Du brauchst starke Munition für die späteren Bosse.
+22. Geh in den tieferen Wassergang und benutze den Aufzug
+    zur Labor-/Steuerungsetage.
+
+04.5  ARMY PROOF, KAMERA UND SKELETTBILD
+--------------------------------------
+23. Öffne die verschlossene Labortür mit der EMBLEMKARTE
+    und gelange in den Steuerraum.
+24. Auf dem Computerpult liegt das ARMY PROOF, das zweite
+    der drei militärischen Abzeichen. Unbedingt mitnehmen.
+25. Benutze das Überwachungssystem und richte die Kamera
+    auf das Skelettbild im anderen Labor. Lies die Zahl 1126.
+26. Kehre zu dem zuerst verschlossenen Labor oben in der
+    Eingangshalle zurück. Benutze den Code 1126 an der Tür.
+27. Nimm das SKELETTBILD (Skeleton Picture) von der Wand.
+    Danach erscheint eine gefährliche Albinoid-Sequenz.
+    Verschwende keine Munition an den kleinen Albinoids;
+    verlasse das Labor so rasch wie möglich.
+28. Kehre zum Diorama-Raum mit der Modellanlage zurück.
+    Hänge das Skelettbild an die freie Stelle der Bilderwand.
+    Dahinter wird ein Fach mit dem GOLDENEN SCHLÜSSEL
+    (Gold Key) sichtbar.
+29. Notiere optional die Zahl 12.8/128, die in diesem Bereich
+    als Hinweis für ein späteres Chemikalienrätsel dient.
+
+ABZWEIGUNG NACH ERHALT DER EMBLEMKARTE:
+  A (empfohlene Reihenfolge): Zuerst Granatwerfer im Keller
+    holen, dann Labor-/Kamerasystem, Army Proof, Skelettbild
+    und Gold Key erledigen.
+  B: Erst die erreichbaren Labore und den Code erkunden,
+    dann in den Keller zum Granatwerfer zurückkehren.
+    Wichtig ist nur, dass du vor dem Verlassen der Insel
+    ALLES in diesem Kapitel abgeschlossen hast.
+
+============================================================
+05 | CLAIRE: PALAST, PORTRÄTS UND PRIVATRESIDENZ
+============================================================
+
+05.1  ZURÜCK ZUM PALAST: GOLD KEY
+--------------------------------
+ 1. Kehre von der Ausbildungsanlage zum Palast zurück.
+    Auf manchen Routen greifen nun Bandersnatches an.
+ 2. Betritt im Erdgeschoss hinter der computerverriegelten
+    Tür den Gang zur GOLDENEN TÜR. Öffne sie mit dem Gold Key.
+ 3. Du bist im Familienporträtzimmer. Das Bild ganz hinten
+    erklärt die Aufgabe: Berühre die sieben Ahnenbilder in
+    korrekter Reihenfolge.
+
+    REIHENFOLGE DES BILDERRÄTSELS:
+      1) Frau Ashford
+      2) Mann mit zwei Babys
+      3) Rothaariger Mann mit Teetasse
+      4) Rothaariger Mann mit Teller im Hintergrund
+      5) Mann mit einem Dokument/Papier
+      6) Mann in Blau bei den Kerzen
+      7) Großes Hauptporträt am Ende des Raums
+
+ 4. Als Belohnung erscheint eine VASE (Earthenware Vase).
+    Untersuche sie im Inventar: Darin steckt die
+    KÖNIGIN-AMEISE (Queen Ant Object).
+
+05.2  GOLDENE LUGERS UND CODE 1971
+---------------------------------
+ 5. Gehe im Palast zum Speicher-/Sekretariatsraum im oberen
+    Stockwerk. Setze die beiden GOLDENEN LUGERS in die
+    entsprechenden Aussparungen der Tür ein.
+ 6. Dahinter liegt ein Büro mit einer antiken Musikvorrichtung.
+    Lies den Hinweis am Computer. Betätige die Schalter wie
+    angegeben: zuerst Links/Rechts, danach Links, danach
+    Rechts und zum Schluss dreimal Rechts.
+ 7. Die vier daraus ablesbaren Ziffern lauten 1-9-7-1.
+    Gib am Computer 1971 ein. Der Geheimgang zur
+    PRIVATRESIDENZ wird freigeschaltet.
+ 8. Im Durchgang kann ein Bandersnatch erscheinen. Weiche
+    aus oder nutze eine starke Waffe. Folge der langen
+    Brücke und den Treppen hinauf zum Haus auf dem Hügel.
+
+05.3  ERSTER BESUCH IN DER PRIVATRESIDENZ
+----------------------------------------
+ 9. Betritt das Haus und benutze gegen Fledermäuse dein
+    Feuerzeug, sofern es noch bei Claire ist.
+10. Untersuche den Eingangsbereich. In einem Seitenzimmer
+    gibt es optionale Vorräte. Steige dann die Haupttreppe
+    hoch und gehe durch die gepolsterte Tür zum oberen Gang.
+11. Nach einer Szene mit Alfred/Alexia suche Alexias
+    Schlafzimmer auf. Dort befindet sich eine Musikschatulle.
+    Solange du noch nicht beide Ameisenobjekte hast, kannst
+    du zunächst den SILBERNEN SCHLÜSSEL (Silver Key)
+    erhalten, indem du die Schatulle betätigst und das
+    freigewordene Bett untersuchst.
+12. Gehe zurück zum Palast. Der SILVER KEY öffnet das
+    CASINO im Obergeschoss und einen weiteren verschlossenen
+    Raum (Umbrella-Besprechungszimmer) im Erdgeschoss.
+13. Das Casino enthält Munition, Kräuter und einen Flügel.
+    Den benötigten PIANOROLLEN-GEGENSTAND hast du noch nicht.
+    Merke dir das Klavier für später.
+14. Öffne den Besprechungsraum mit dem Silver Key und nimm
+    dort die weitere ADLERPLATTE (Eagle Plate) für den
+    Gefängnis-Nebenweg mit. Durchsuche den Raum auch nach
+    Akten und Munition.
+
+05.4  VOR DEM ZWEITEN BESUCH WICHTIGE RÜCKWEGE
+---------------------------------------------
+15. Jetzt stehen zwei Aufgaben an, die du beliebig nacheinander
+    erledigen kannst: Rodrigo besuchen und den geheimen
+    Gefängnisbereich öffnen. Beide lassen sich auf EINEM
+    gemeinsamen Weg erledigen. Kapitel 06 beschreibt das.
+
+ABZWEIGUNG JETZT:
+  WEG A (EMPFOHLEN): Blutstillendes Mittel + Feuerzeug aus der Itembox
+    holen, im Gefängnis Rodrigo versorgen, Gefängnisrätsel
+    lösen, Pianorolle bekommen. Danach ins Casino und in
+    die Privatresidenz. Das spart einen langen Rückweg.
+  WEG B: Zuerst optionale Palastzimmer und Vorräte einsammeln,
+    erst danach ins Gefängnis. Funktioniert ebenfalls, kostet
+    aber mehr Zeit. Unbedingt vor der Flugzeugflucht erledigen.
+
+============================================================
+06 | CLAIRE: GEFÄNGNIS, MUSIKSCHATULLEN UND FLUCHT
+============================================================
+
+06.1  ZU RODRIGO ZURÜCK: DIETRICH SICHERN
+----------------------------------------
+ 1. Vergewissere dich, dass Claire das BLUTSTILLENDE MITTEL
+    (Hemostatic) dabei hat. Nimm auch ihr FEUERZEUG mit.
+ 2. Laufe über Brücke und Gefängnishof zurück zur Zelle vom
+    Spielbeginn. Übergib Rodrigo das Mittel.
+ 3. Er bedankt sich mit dem DIETRICH (Lockpick) und erhält
+    von Claire das Feuerzeug. So kommt Chris später an das
+    Feuerzeug. Diese Handlung ist optional für den direkten
+    Abspann, aber dringend empfohlen.
+ 4. OPTIONAL: Mit dem Dietrich lassen sich verschlossene
+    Duraluminiumkoffer öffnen. Besonders wichtig ist der
+    Koffer im späteren Gefängnis-Krematorium: Er enthält die
+    M93R-WAFFENTEILE. Kombiniere sie mit Claires Pistole.
+
+06.2  HINRICHTUNGSHOF UND GEHEIMER FOLTERBEREICH
+-----------------------------------------------
+ 5. Gehe zu dem Bereich hinter der Guillotine. Setze die
+    ADLERPLATTE aus dem Palast-Besprechungszimmer in die
+    entsprechende Türvertiefung ein. Der neue Teil des
+    Gefängnisses öffnet sich.
+ 6. Im angrenzenden Hof greifen Zombies an. Du kannst ein
+    explosives Fass nutzen. Hinter den Türen befinden sich
+    ein medizinischer Trakt und weitere Vorratsräume.
+ 7. Nimm den DIETRICH-KOFFER im Krematorium mit und öffne
+    ihn: Er enthält die M93R-Verbesserung.
+ 8. Beachte den auffälligen Arzt-Zombie (Anatomist). Nachdem
+    er angreift und du ihn besiegst, hinterlässt er ein
+    GLASAUGE (Glass Eye).
+ 9. Setze das Glasauge in das anatomische Modell im Klinik-
+    bereich ein. Eine verborgene Treppe öffnet sich.
+10. Steige ab, durchquere die Folterbereiche und folge dem
+    Weg bis zum Raum mit den Statuen.
+
+06.3  SCHWERT- UND STATUENRÄTSEL
+------------------------------
+11. Nimm das ROSTIGE SCHWERT (Rusted Sword) aus der Statue.
+    Der Raum wird daraufhin mit Gas gefüllt.
+12. Drehe die zentrale Statue, um den Gasmechanismus zu
+    stoppen. Reagiere zügig, bevor Claire Schaden erleidet.
+13. Setze das Schwert in die dafür vorgesehene Öffnung
+    der eisernen Figur. Eine EISERNE JUNGFRAU wird geöffnet.
+14. Wehre die Zombies ab und nimm die PIANOROLLE
+    (Piano Roll) aus der geöffneten Statue.
+15. Rückweg: Geh aus dem Gefängnis über die bekannte Brücke
+    zurück in den Palast.
+
+06.4  CASINO UND KÖNIGSAMEISE
+----------------------------
+16. Geh in das Casino im Palast-Obergeschoss. Setze die
+    PIANOROLLE in das automatische Klavier ein.
+17. Das Klavier spielt und öffnet einen der Spielautomaten.
+    Daraus nimmst du das KÖNIGSAMEISEN-OBJEKT
+    (King Ant Object).
+18. Du solltest nun zwei Ameisenobjekte haben:
+      - Queen Ant Object aus der Vase im Porträtzimmer.
+      - King Ant Object aus dem Casino.
+19. Geh durch den geheimen Palastgang erneut zum Haus auf
+    dem Hügel und dort in die beiden Schlafzimmer.
+
+06.5  BEIDE MUSIKSCHATULLEN UND DRAGONFLY
+----------------------------------------
+20. In ALEXIAS ZIMMER setzt du die QUEEN ANT in die
+    vorgesehene Schatulle. Entnimm die MUSIKPLATTE
+    (Music Box Plate), nachdem die Schatulle geöffnet ist.
+    Falls noch nicht geschehen, nimm hier auch den Silver Key.
+21. In ALFREDS ZIMMER setzt du die KING ANT ein und legst
+    anschließend die Musikplatte in seine Schatulle.
+22. Der Mechanismus am Bett öffnet einen Durchgang nach
+    oben. Steige über das Bett und die Leiter hinauf.
+23. Im Spielzimmer findest du eine SILBERNE LIBELLE
+    (Silver Dragonfly). Untersuche sie im Inventar und
+    entferne ihre Flügel, damit der Körper als Schlüssel dient.
+24. Setze den Libellenkörper in die Öffnung im großen
+    Ameisenrelief an der Wand. Das Karussell öffnet die Leiter.
+25. Steige hinauf in das obere Arbeitszimmer, bewege die
+    Kiste an den Schrank und nimm den Brief und das
+    LUFTWAFFEN-ABZEICHEN (Air Force Proof) mit.
+26. Damit hast du alle drei Abzeichen für den Flughafen:
+    Navy Proof, Army Proof und Air Force Proof.
+27. Kehre zum Schlafzimmerbereich zurück. Nach den Szenen
+    mit Alfred und der Perücke wird die Flucht eingeleitet.
+
+06.6  ABFLUG VORBEREITEN
+-----------------------
+28. Vor dem endgültigen Verlassen der Insel kontrolliere:
+    - Rodrigo mit Hemostatic versorgt?
+    - Leerer Feuerlöscher in einer normalen Itembox?
+    - Koffer und M93R-Teile mit Dietrich geholt?
+    - Grenade Launcher und Bow Gun vorhanden?
+    - Explosive Pfeile für den Tyrant gesichert?
+    - Navy, Army, Air Force Proof eingesammelt?
+29. Kehre zum Palast-U-Boot zurück, fahre zum Flughafen
+    und folge Steve zur Abflugplattform.
+
+============================================================
+07 | CLAIRE: FLUGHAFEN, TYRANT UND FLUGZEUG
+============================================================
+
+07.1  DREI ABZEICHEN, FLUGZEUG UND BRÜCKE
+----------------------------------------
+ 1. Setze Navy, Army und Air Force Proof in die drei
+    Einlassungen am Plattformmechanismus ein. Falls du
+    Navy bereits dort eingesetzt hast, fehlen jetzt nur
+    Army und Air Force.
+ 2. Aktivere den Plattformlift zum Frachtflugzeug. Betritt
+    die Maschine und sieh dir das Cockpit an.
+ 3. Steve kann noch nicht starten, weil die Flughafenbrücke
+    im Weg ist. Nimm im Cockpit den STEUERHEBEL
+    (Control Lever) auf.
+ 4. Verlasse das Flugzeug und kehre über die Plattform in
+    den Flughafen zurück. Benutze den kleinen Aufzug im
+    Frachtbereich, um zur oberen Brückensteuerung zu kommen.
+ 5. Setze den Steuerhebel in das Bedienpult und hebe damit
+    die Brücke auf die höhere Position.
+ 6. Überquere die Brücke und hole im Raum auf der anderen
+    Seite den FLUGHAFENSCHLÜSSEL (Airport Key) vom
+    toten Mitarbeiter.
+ 7. Kehre in die untere Frachtzone zurück und verwende den
+    Airport Key am Rolltor zur Plattform-Liftsteuerung.
+ 8. Im kleinen Raum mit einer Itembox liegen Vorräte.
+    Schiebe beide beweglichen Kisten so an die Plattform-
+    öffnung, dass der Frachtaufzug wieder benutzt werden
+    kann. Eine Kiste zuerst gerade hinein; die zweite
+    zunächst seitlich vor die Öffnung und dann hineinschieben.
+ 9. Bereite eine schnelle Flucht vor: Nach dem Lift beginnt
+    ein fünfminütiger Countdown.
+
+07.2  TYRANT, ERSTE BEGEGNUNG
+----------------------------
+10. Fahre hoch zum Außenbereich und laufe Richtung Palast.
+    Der TYRANT erscheint auf der Route.
+11. Halte Distanz und schieße mit Granaten, Säure-/B.O.W.-
+    Munition oder anderen starken Waffen. Weiche aus,
+    wenn er anstürmt. Lass dich nicht an den Rand oder die
+    brennenden Fässer drängen.
+12. Nach genügend Treffern knickt er ein bzw. wird
+    zurückgeschlagen. Lauf an ihm vorbei und gehe auf dem
+    bekannten Weg zum U-Boot und zum Flugzeug.
+
+07.3  WICHTIGER BOSS: TYRANT IM FRACHTRAUM
+-----------------------------------------
+13. Vor dem Öffnen der hinteren Flugzeugtür:
+    - Stelle mindestens ein bis zwei starke Heilungen bereit.
+    - Nimm Bow Gun + EXPLOSIVE PFEILE mit, idealerweise
+      einen großen Vorrat.
+    - Ergänze Granatwerfer oder andere starke Schüsse.
+    - Speichere im Cockpit, wenn du keinen A-Rang anstrebst.
+14. Betritt den Frachtbereich. Der Tyrant steht dir erneut
+    gegenüber. An der Wand ist der Knopf für den
+    FRACHTAUSWURF.
+15. Das Ziel ist NICHT, ihn nur durch Schüsse zu besiegen.
+    Du musst ihn weit genug schwächen und anschließend
+    mit der ausgeworfenen Kiste aus dem Flugzeug stoßen.
+16. Halte dich in der Nähe des Auswurfknopfes auf.
+    Schieße explosive Pfeile oder starke Granaten, während
+    du genügend Abstand zum Tyrant hältst.
+17. Betätige den Knopf, wenn er stark geschwächt ist.
+    Der Mechanismus muss nach einer Benutzung wieder
+    bereit werden. Ist der Tyrant noch zu kräftig, wird er
+    nicht weit genug hinausgeschleudert.
+18. Wiederhole Schüsse und Kistenmechanismus, bis die
+    Frachtkiste ihn endgültig aus dem Flugzeug befördert.
+    Alternativ kann man ihn bei sehr wenig Munition durch
+    mehrfaches, zeitlich korrektes Auslösen des Mechanismus
+    besiegen, was riskanter ist.
+19. Nach dem Sieg folgt die Reise in die Antarktis.
+    Das Spiel bietet in manchen Versionen einen kostenlosen
+    Zwischenspeicherstand an.
+
+ABZWEIGUNG BEIM BOSS:
+  A (sicher): Starkes Arsenal einsetzen, nach deutlicher
+    Schwächung den Frachtknopf drücken.
+  B (munitionarm): Tyrant kreisen lassen, Auswurf mehrfach
+    auslösen. Du benötigst dann präzises Timing und Heilung.
+
+============================================================
+08 | CLAIRE: ANTARKTIS UND NOSFERATU
+============================================================
+
+08.1  ABSTURZ UND ERSTES ERKUNDEN
+--------------------------------
+ 1. Nach der Landung folge dem Weg in die Antarktisstation.
+    Im Schlafraum findest du Munition, Kräuter, Karte und
+    Akten. Einige scheinbar tote Zombies stehen auf.
+ 2. Gehe die Treppen weiter nach unten. Im Flur leben
+    riesige Motten. Sie können giftige Larven ablegen.
+    Blaue Kräuter liegen in diesem Bereich.
+ 3. Betritt den SPEICHERRAUM. Nutze die Itembox. Hinter
+    einem verschiebbaren Schrank liegt ein verborgenes
+    Fach mit Aufzeichnungen. Du kannst hier später über
+    die Schließfächer einen weiteren Nebenbereich öffnen.
+ 4. Im großen Lagerraum erreichst du Türen mit den
+    Aufschriften WEAPON und B.O.W.
+
+08.2  WAFFENRAUM, B.O.W.-RAUM UND FÖRDERBAND
+------------------------------------------
+ 5. Gehe zunächst in den WAFFENRAUM (Weapon Room).
+    Nimm den BERGWERKSCHLÜSSEL (Mining Room Key) und
+    suche den ZÜNDER (Detonator) an einer Leiche.
+ 6. Bringe den Zünder an den Sprengladungen des dortigen
+    verschlossenen Schranks an. Chris kann die Ladung später
+    mit dem Feuerzeug auslösen, um Munition zu finden.
+ 7. OPTIONAL: In einem Waffenschrank liegen ein STURMGEWEHR
+    (Assault Rifle) und/oder weitere Kampfmittel.
+ 8. Gehe in den B.O.W.-RAUM. Vorsicht vor Spinnen und Gift.
+    Nimm von einer Kiste den STRICHCODEN-AUFKLEBER
+    (Bar Code Sticker).
+ 9. Klebe ihn im zentralen Lagerraum auf das dazugehörige
+    Paket auf dem Förderband. Die Sortieranlage soll später
+    das richtige Paket zum B.O.W.-Raum transportieren.
+10. Benutze den Mining Room Key für den oberen Weg des
+    Lagers. Er führt in den Maschinen- und Strombereich.
+11. Aktiviere den Generator und die Stromversorgung am
+    Schalter im Betriebsbereich. Jetzt funktioniert auch
+    die Förderanlage.
+12. Kehre zum Förderband zurück und betätige die
+    Steuerung. Die mit Barcode versehene Lieferung wird
+    sortiert und in den B.O.W.-Raum gebracht.
+13. Nimm dort die nun zugängliche GASMASKE (Gas Mask)
+    aus dem Fach beim Eingang.
+
+08.3  GEHEIMFACH, BLUMENTOPF UND VENTIL
+--------------------------------------
+14. Geh zurück in den Speicherraum beim Mottenflur.
+    Untersuche die Schränke hinter dem verschiebbaren
+    Möbelstück. Ein Schalter eröffnet einen weiteren
+    verborgenen Bereich.
+15. Nimm dort den BLUMENTOPF (Plant Pot). Drehe ihn im
+    Inventar um. Am Boden klebt der MASCHINENRAUM-
+    SCHLÜSSEL (Machine Room Key).
+16. Kehre zu dem Bereich am abgestürzten Flugzeug zurück
+    und öffne damit die betreffende Maschinenraumtür.
+17. Hole das VENTILRAD (Valve Handle) auf dem metallenen
+    Steg im Maschinen-/Strombereich.
+18. Gehe damit in den Werkzeugraum mit der Drehmaschine.
+    Lasse das Ventilrad dort auf die benötigte achteckige
+    Form umarbeiten (Octa Valve Handle).
+19. Stelle sicher, dass die GASMASKE bereit ist und du
+    mindestens ein freies Feld für das Scharfschützengewehr
+    hast. Die nächste Sequenz endet in einem Bosskampf.
+
+08.4  GAS ABSCHALTEN UND NOSFERATU
+---------------------------------
+20. Kehre in den Bergwerks-/Gasraum zurück, den du über
+    den oberen Lagerweg erreicht hast.
+21. Setze die GASMASKE ein, wenn du den vergasten Teil
+    betreten musst, und benutze das umgearbeitete
+    VENTILRAD, um die Gaszufuhr zu schließen.
+22. Eine Geschichte-Szene mit Alfred und Steve folgt.
+    Alfred lässt das SCHARFSCHÜTZENGEWEHR (Sniper Rifle)
+    fallen. Nimm es vor dem Weitergehen mit.
+23. WARNUNG: Lege jetzt in der ITEMBOX Waffen und Munition
+    ab, die CHRIS später erhalten soll, insbesondere starke
+    Waffen und Heilmittel. Lass genügend Heilung für Claire
+    selbst, solange sie noch hier ist.
+24. Steige auf die Außenseite/Helikopterplattform.
+    NOSFERATU greift an.
+
+08.5  BOSS: NOSFERATU
+--------------------
+25. Bleibe möglichst in der Mitte der Plattform. An den
+    ungeschützten Rändern kann dich sein Schlag hinunter-
+    stoßen und sofort töten.
+26. Halte Abstand, um dem Giftnebel und den Tentakelhieben
+    auszuweichen. Seine besondere Vergiftung lässt sich
+    später nicht einfach mit einem blauen Kraut heilen.
+27. Nutze das Zielfernrohr des Sniper Rifle und triff die
+    freiliegende Herzstelle seines Körpers. Das Gewehr hat
+    nur wenige Schüsse, also ziele sorgfältig.
+28. Wenn die Gewehrmunition nicht reicht, wechsle auf
+    explosive Pfeile oder den Granatwerfer und setze den
+    Kampf aus sicherer Entfernung fort.
+29. Nach dem Sieg folgt der nächste große Charakterwechsel.
+    Von nun an spielst du zunächst CHRIS REDFIELD.
+
+ABZWEIGUNG AM ENDE VON CLAIRES ABSCHNITT:
+  A (empfohlen): Sniper Rifle am Gegner einsetzen,
+    Granaten/Pfeile als Reserve nutzen, möglichst nicht
+    vergiften lassen.
+  B: Mit stärkeren Waffen statt dem Gewehr kämpfen.
+    Möglich, benötigt aber mehr mitgebrachte Munition.
+
+============================================================
+09 | CHRIS: RÜCKKEHR NACH ROCKFORT ISLAND
+============================================================
+
+09.1  RODRIGO UND GULP WORM
+-------------------------
+ 1. Chris erreicht die Insel auf der Suche nach Claire.
+    Er trifft Rodrigo beim Höhleneingang wieder.
+ 2. Wenn Claire Rodrigo geholfen hat, kannst du nach dem
+    Gulp-Worm-Kampf sein FEUERZEUG erhalten. Das ist für
+    einen optionalen Waffenfund nützlich.
+ 3. Bevor du weiterziehst, gehe zum Speicherbereich der
+    Höhle und rüste Chris aus der GEMEINSAMEN ITEMBOX aus.
+ 4. Der GULP WORM erscheint. Um Rodrigo zu retten, musst
+    du ihn besiegen. Halte Abstand und schieße, sobald
+    der Wurm aus dem Boden auftaucht.
+ 5. Nach dem Sieg erhältst du von Rodrigo das Feuerzeug,
+    sofern die vorherige Claire-Aufgabe erfüllt wurde.
+ 6. OPTIONAL: Kehre zu der dunklen Wandnische mit einem
+    Relief in der Höhle zurück und entzünde sie mit dem
+    Feuerzeug. Darin sind die SUBMACHINE GUNS versteckt.
+ 7. Fahre mit dem Aufzug zur Garage in der Ausbildungsanlage.
+
+09.2  PANZER, GEHEIMGANG UND SPEICHERRAUM
+---------------------------------------
+ 8. Verlasse die Garage zur Außenseite mit dem Panzer.
+    Betätige dort den auffälligen Schalter. Der Panzer
+    fährt beiseite und gibt einen geheimen Aufzug frei.
+ 9. Fahre nach unten und folge dem Tunnel bis zum
+    unterirdischen Speicherraum mit ITEMBOX.
+10. Dort findest du Munition und eine Waffe bzw. Pistole.
+    Nimm dir Zeit, die neue Umgebung zu erkunden.
+11. OPTIONAL, ABER FÜR BATTLE GAME WICHTIG:
+    Öffne im Speicherraum die Schubladen des Schranks
+    in der Reihenfolge ROT -> GRÜN -> BLAU -> BRAUN.
+    Der letzte Schub enthält die LUGER-NACHBILDUNG
+    (Luger Replica). Lege sie in die Itembox und beende
+    später das Hauptspiel, um Steve im Battle Game
+    freizuschalten.
+
+09.3  BATTERIE UND GARAGENLIFT
+-----------------------------
+12. Folge dem unterirdischen Gang zum Lagerraum und nimm
+    die BATTERIE (Battery Pack) auf. Achte auf Spinnen.
+13. Kehre in die GARAGE zurück, setze die Batterie in den
+    gelben Hebelift ein und fahre hoch auf die obere Ebene.
+14. Dort findest du den CHEMIKALIENLAGERSCHLÜSSEL
+    (Chemical Storage Key) und eine Notiz über Spezial-
+    legierungen (Alloy Report).
+15. Über die oberen Galerien gelangst du in weitere
+    Bereiche der beschädigten Ausbildungsanlage.
+
+09.4  TÜRKNOPF, MODELLPANZER UND DREHTELLER
+------------------------------------------
+16. Gehe zu dem Aufzug-/Wassergangbereich. Wenn du die
+    SHOTGUN aus ihrer Halterung nimmst, bewegt sich eine
+    Treppe. Die Halterung wirkt wie ein Mechanismus:
+    Du kannst die Waffe später wieder einhängen, um den
+    ursprünglichen Weg zu öffnen.
+17. Nutze den Aufzug und die Wege zum Labor. Finde dort
+    einen TÜRKNOPF (Door Knob) auf einem beschädigten
+    Übergang bzw. im Turntable-Bereich.
+18. An einer Tür der oberen Etage fehlt der Türknopf.
+    Setze den gefundenen Door Knob ein.
+19. Durchquere die obere Westgalerie der Garage und hole
+    den MODELLPANZER (Tank Object) vom Tisch.
+20. Gehe zum Diorama-Raum mit dem Modell der Ausbildungs-
+    anlage. Stelle den Modellpanzer in die vorgesehene
+    Aussparung des Dioramas.
+21. Ein verstecktes Fach öffnet sich. Nimm den
+    DREHTELLERSCHLÜSSEL (Turn Table Key) und die Notiz.
+22. Mit dem Turn Table Key bedienst du die große
+    drehbare Plattform im Untergeschoss. Dadurch wird
+    der weitere unterirdische Weg freigeschaltet.
+
+09.5  CHEMIKALIEN FÜR DIE HELLEBARDE
+-----------------------------------
+23. Öffne mit dem Chemical Storage Key den
+    CHEMIKALIENLAGERRAUM der Anlage.
+24. Der Kühlschrank verlangt einen Temperaturwert.
+    Stelle ihn auf 12.8 ein. Du bekommst CLEMENT SIGMA
+    (Clement Σ).
+25. Gehe außerdem in die WAFFENREPARATUR-WERKSTATT
+    (Weapon Repair Shop) auf der Untergeschoss-Ebene.
+    Dort liegt CLEMENT ALPHA (Clement α).
+26. EMPFOHLEN: Führe in derselben Werkstatt die
+    Pistolenverbesserung am Arbeitstisch durch, solange
+    Chris seine Glock noch im Inventar hat. Du erhältst
+    die MODIFIED GLOCK 17.
+27. Kombiniere Clement α und Clement Σ im Inventar zu
+    CLEMENT MIXTURE. Die Mischung brauchst du später
+    für eine weitere ADLERPLATTE.
+
+ABZWEIGUNG IN CHRIS' ANLAGE:
+  A (übersichtlich): Erst Batterie, dann Türknopf und
+    Modellpanzer, dann Turn Table Key, danach beide
+    Clement-Chemikalien. Diese Reihenfolge ist hier erklärt.
+  B: Sobald der Chemical Storage Key verfügbar ist,
+    kannst du die Sigma-Chemikalie früher holen. Die
+    Reihenfolge der beiden Clement-Bestandteile ist egal.
+
+============================================================
+10 | CHRIS: LABOR, FLUGHAFEN UND ABFLUG
+============================================================
+
+10.1  UNTERIRDISCHES LABOR UND WESKER
+-------------------------------------
+ 1. Benutze Turn Table Key und die Zugänge der
+    Ausbildungsanlage, um die unterirdischen Labore
+    und den früheren Wasser-/Shotgun-Bereich zu erreichen.
+ 2. Die Überwachungsroboter können Hunters oder Sweeper
+    herbeilocken. Laufe möglichst außer Sicht oder kämpfe
+    in freiem Raum statt an einer Engstelle.
+ 3. Im Labor kommt es zu einer Begegnung mit Wesker und
+    einer mutierten Kreatur. Benutze Shotgun oder starke
+    Waffen, um die Kreatur aus sicherer Entfernung zu töten.
+ 4. Suche nach einem Bedienpult, mit dem du den Zugang
+    der unteren Teile zur zerstörten Eingangshalle öffnest.
+ 5. In einem vergasten Abschnitt musst du die
+    LÜFTUNGSANLAGE über einen Schalter aktivieren, bevor
+    du sicher durch die unteren Räume gehen kannst.
+ 6. Finde über diese Strecke das letzte benötigte
+    Labormaterial Clement α, falls du es noch nicht hast.
+    Die Mischung beider Chemikalien sollte nun fertig sein.
+
+10.2  FLUGHAFENBRÜCKE UND ÖLMENGENRÄTSEL
+---------------------------------------
+ 7. Kehre über den Lastenaufzug vom Wurmplatz zum
+    Flughafenbereich zurück.
+ 8. Durchquere die obere Flughafenebene bis zum
+    Bedienraum der Hubbrücke. Dort befindet sich ein
+    Rätsel mit Flüssigkeitsbehältern.
+ 9. Ziel: In der Anlage müssen EXAKT 7 EINHEITEN
+    im richtigen Behälter übrig bleiben.
+10. Eine funktionierende Bedienfolge lautet:
+       3 -> 3 -> 3 -> 3 -> 10 -> 3 -> 5
+    Drücke nacheinander die entsprechend markierten
+    Tasten. Die Brückenmechanik wird dadurch nutzbar.
+11. Kehre zur Brücke zurück und senke sie auf die
+    benötigte Ebene ab, um den Weg zum unteren
+    Flughafenbereich wieder begehbar zu machen.
+12. Überquere den unteren Übergang, gehe ins Büro am
+    Aquarium und zum Plattformmechanismus.
+13. Nimm die DREI ABZEICHEN (Navy/Army/Air Force Proof)
+    wieder aus der Plattformsteuerung heraus.
+
+10.3  DIORAMA-UNTERGRUND UND ALBINOID
+------------------------------------
+14. Kehre zur Ausbildungsanlage und ihrem Diorama-
+    Speicherraum zurück.
+15. Setze die drei Proofs in die passenden Schlitze
+    beim Diorama ein. Die Miniaturanordnung verschiebt
+    sich und öffnet einen unterirdischen Durchgang.
+16. Steige die Leitern hinab, weiche den Spinnen aus
+    und sammle optional die Vorräte ein.
+17. Unten triffst du auf den AUSGEWACHSENEN ALBINOID
+    im elektrisch geladenen Wasserbecken.
+18. Im Becken liegt eine ADLERPLATTE (Eagle Plate).
+    Du hast zwei Möglichkeiten:
+       A) Sicherer: Warte am Rand, schieße auf den
+          auftauchenden Albinoid und hole die Platte,
+          wenn die Gefahr beseitigt ist.
+       B) Schneller: Sprinte mit guter Gesundheit ins
+          Wasser, greife die Platte und verlasse es
+          sofort. Die Stromangriffe sind gefährlich.
+19. Kombiniere die ADLERPLATTE mit der CLEMENT MIXTURE.
+    Die Beschichtung löst sich und lässt eine
+    HELLEBARDE (Halberd) zurück.
+20. Steige zurück an die Oberfläche. Setze die
+    Hellebarde an der Tür zum Flugzeughangar ein.
+21. WARNUNG: Vor dem Abflug von Rockfort alle dort
+    gewünschten Gegenstände mitnehmen. Die Insel wird
+    danach nicht mehr zugänglich. Chris fliegt mit dem
+    Harrier in die Antarktis.
+
+============================================================
+11 | CHRIS: ANTARKTIS, MAGNUM UND AMEISENLABOR
+============================================================
+
+11.1  ANKUNFT, HALBERDE UND LEERER FEUERLÖSCHER
+----------------------------------------------
+ 1. Verlasse den Hangar und folge dem Weg zum Bereich
+    von Claires abgestürztem Flugzeug. Die Tentakel in
+    der Wand lassen sich mit gezielten Schüssen vertreiben.
+ 2. Betritt den ehemaligen Speicherraum am Mottenflur.
+    Öffne den mit der HELLEBARDE gesicherten Wandschrank.
+    Nimm den PAPIERBESCHWERER (Paper Weight), lese
+    Alfreds Tagebuch und sammle die Vorräte ein.
+ 3. Hole den LEEREN FEUERLÖSCHER aus deiner Itembox.
+    Falls du ihn schon als Claire zurückgelassen hast,
+    kannst du jetzt die Magnum bekommen.
+ 4. Laufe zum großen, teilweise vereisten Lagerraum,
+    den Claire bereits erkundet hatte. Nutze die Wege
+    am Rand der gefrorenen Halle.
+ 5. Im Bereich beim Wassertank steht eine Nachfüllanlage.
+    Hole den Zylinder mit der Bedienung hoch und fülle
+    dort den Feuerlöscher wieder auf.
+ 6. Benutze den kleinen Aufzug nach unten in den
+    brennenden Lagerabschnitt. Lösche das Feuer und
+    nimm die MAGNUM vom Band beziehungsweise
+    dem freigewordenen Bereich.
+ 7. EMPFOHLEN: Die Magnum für Alexia aufbewahren.
+    Du wirst sie am Ende des Spiels sehr schätzen.
+ 8. OPTIONAL: Falls Claire den Zünder im Waffenschrank
+    angebracht hat und Chris das Feuerzeug besitzt,
+    kannst du dort eine Sprengladung auslösen und
+    zusätzliche Munition erhalten.
+
+11.2  STROMVERSORGUNG IM NEUEN BASISABSCHNITT
+--------------------------------------------
+ 9. Gehe vom vereisten Lager über die anderen Gänge
+    zum Speicherraum des neuen Basisabschnitts.
+10. Besorge dir das ACHTECKIGE VENTILRAD, das Claire
+    im Gasabschnitt verwendet hat, falls es noch nicht
+    in der Itembox liegt.
+11. Setze das Rad in der Maschinen-/Stromzentrale ein
+    und aktiviere die Versorgung über den Schalter.
+12. Erkunde die neuen Flure, Zimmer und die Räume,
+    die an das klassische Spencer-Herrenhaus erinnern.
+    Hier liegen neben Vorräten auch ein Kartenfragment
+    und mehrere wichtige Objekte.
+
+11.3  TIGERKOPF, SOCKEL UND VENTILADAPTER
+----------------------------------------
+13. Suche den Raum mit der TIGERKOPF-STATUE auf.
+    Solange Strom anliegt, sind ihre Augen und der
+    versteckte Mechanismus beweglich.
+14. Nimm vorübergehend den BLAUEN EDELSTEIN aus dem
+    Tigerauge. Im freigelegten Fach findest du den
+    STECKAUFSATZ (Socket).
+15. Setze das blaue Auge wieder ein. Beim anderen Auge
+    kannst du optional Magnum-Munition aus dem zweiten
+    Fach holen. Setze den Edelstein danach ebenfalls zurück.
+16. Kombiniere das OCTA VALVE HANDLE später mit dem
+    SOCKET. Daraus wird das SQUARE VALVE HANDLE,
+    das an den neuen Ventilen passt.
+
+11.4  AMEISENKOLONIE UND ALFREDS LEICHE
+--------------------------------------
+17. Nutze den Aufzug in den tieferen Ameisenbereich.
+    Beachte die Ameisen auf dem Boden und die Brutstätte.
+18. Nimm in diesem Bereich den ersten LIBELLENFLÜGEL
+    (Wing Object) auf. Weitere Flügel findest du später.
+19. Durchsuche die Laborräume auf beiden Seiten der
+    Kolonie. Die Akten erklären den Code-Veronica-Virus.
+20. Im Labor mit der Kapsel steht ein Bedienpult, das den
+    Papierbeschwerer benötigt. Benutze folgende Zeichen:
+       AA -> KRONE -> HERZ -> PIK
+    Setze dann den PAPER WEIGHT ein.
+21. Die Kapsel öffnet sich. Untersuche Alfreds Leiche
+    und nimm den RING (Alfred's Ring) ab.
+22. Untersuche den Ring im Inventar. Entferne den
+    BLAUEN FAMILIEN-EDELSTEIN (Alfred's Jewel).
+23. Kehre ins obere Stockwerk zurück.
+
+11.5  KARUSSELL UND CLAIRE RETTEN
+--------------------------------
+24. In der Garten-/Karussellzone liegen zwei weitere
+    LIBELLENFLÜGEL. Einer ist am Weg beim Karussell,
+    ein anderer im flachen Wasser am Rand.
+25. Benutze die Doppeltür zum nachgebauten Herrenhaus.
+    Auf dem oberen Treppenabsatz kannst du ein MESSER
+    (Combat Knife) aufnehmen.
+26. Gehe hinter die große Treppe. Claire ist von einer
+    schleimigen Substanz eingeschlossen. Benutze das
+    MESSER, um sie herauszuschneiden.
+27. Wenn Claire durch Nosferatus Gift verletzt wurde,
+    braucht sie ein spezielles SERUM. Hole es aus dem
+    alten Antarktis-Waffenraum bzw. dem dortigen
+    Medizinvorrat, zu dem du über Aufzug und Lager
+    zurückkommst, und bring es zu ihr.
+28. Nach ihrer Rettung folgt ein weiterer Wechsel:
+    CLAIRE wird für einen kurzen Abschnitt spielbar.
+
+ABZWEIGUNG BEI CLAIRES VERGIFTUNG:
+  A: Nicht vergiftet -> Nach der Szene direkt weiter.
+  B: Durch Nosferatu vergiftet -> Vor dem Wechsel muss
+     Chris das Serum aus dem früheren Waffenraum holen.
+
+============================================================
+12 | CLAIRE: LETZTER ABSCHNITT UND STEVE
+============================================================
+
+12.1  BEVOR DU LOSGEHST: HEILUNG UND INVENTAR
+--------------------------------------------
+ 1. Prüfe Claires Gesundheitszustand. Heile sie voll,
+    bevor du das Zimmer verlässt.
+ 2. Nimm mehrere starke Kräutermischungen oder
+    First Aid Sprays mit. Die nächste Verfolgung ist
+    gefährlicher als die meisten normalen Bosskämpfe.
+ 3. Wenn Chris eine Waffe und Munition für später
+    braucht, lasse sie in der gemeinsamen Itembox.
+    Entnimm nur das, was Claire tatsächlich braucht.
+ 4. OPTIONAL: Im Raum kann ein verschiebbarer Schrank
+    die Schrotflintenhalterung freilegen. Hänge die
+    Shotgun kurz ein, nimm die Belohnung aus dem
+    Fach und hole die Waffe anschließend wieder ab.
+ 5. Gehe in den Gang mit den lebenden Tentakeln und
+    folge ihm zum unterirdischen Zellenbereich.
+
+12.2  KANONE, KRISTALL UND SCHWERE STEINFALLE
+--------------------------------------------
+ 6. In der Zellenanlage findest du eine große Kanone.
+    Lies die SECURITY FILE auf dem Boden in ihrer Nähe.
+ 7. Drehe am Kanonenmechanismus. Es wird ein KRISTALL
+    (Crystal) herausgegeben, in dem eine SECURITY CARD
+    eingeschlossen ist.
+ 8. Im selben Raum schlägt ein riesiger Steinblock in
+    regelmäßigen Abständen auf den Boden.
+ 9. Das Ziel: Lege den Kristall GENAU UNTER DIE FALLEN-
+    FLÄCHE, damit der Block ihn zertrümmert.
+10. Warte, bis der Steinblock nach oben fährt. Laufe
+    zur Aufschlagstelle, lege das Crystal über das
+    Inventar dort ab und entferne dich sofort.
+11. Nach dem Aufprall kannst du die SECURITY CARD
+    aus den Scherben mitnehmen.
+12. WARNUNG: Stehe niemals unter dem fallenden Block.
+    Ein Treffer führt zum sofortigen Tod.
+13. Kehre zur großen Zellenhalle zurück und verwende
+    die Security Card am Lesegerät für das Gitter.
+14. Folge dem freigeschalteten langen Gang bis zu Steve.
+
+12.3  STEVE-VERFOLGUNG: NICHT KÄMPFEN!
+-----------------------------------
+15. Nach der Zwischensequenz verwandelt sich Steve
+    und verfolgt Claire mit einer riesigen Axt.
+16. NICHT schießen. Du kannst ihn in dieser Szene
+    nicht regulär besiegen.
+17. Drehe sofort um und renne Richtung Ausgangsgitter.
+    Versuche an der Seite von Steve vorbeizukommen.
+    Achte darauf, nicht an der Wand hängenzubleiben.
+18. Wird Claire getroffen, öffne SOFORT das Inventar,
+    bevor du weiterläufst, und benutze eine starke Heilung.
+    Ein zweiter Treffer bei geringer Gesundheit ist tödlich.
+19. Lauf weiter, bis die rettende Zwischensequenz beginnt.
+    Danach endet Claires spielbarer Abschnitt.
+
+ABZWEIGUNG BEI STEVE:
+  A (sicher): Mit voller Gesundheit und mindestens
+    2-3 starken Heilmitteln losrennen. Nach JEDEM
+    Treffer heilen.
+  B (schnell): Eng an einer Seite vorbeilaufen,
+    Steves Angriff animieren lassen und direkt zum
+    Ausgang sprinten. Das erfordert Übung.
+
+============================================================
+13 | CHRIS: EDELSTEINE, LIBELLE UND FINALE
+============================================================
+
+13.1  ALEXIA: ERSTER KAMPF
+-------------------------
+ 1. Du spielst wieder Chris. Bereite die MAGNUM,
+    Schrotflinte und Heilmittel vor.
+ 2. Alexia steht dir im großen Herrenhaus-Hauptsaal
+    gegenüber. Ihr Nahkampfangriff ist ein sofortiger
+    tödlicher Treffer. Halte STETS Abstand.
+ 3. Weiche ihren Flammen auf dem Boden aus und feuere
+    gezielte Magnum-Schüsse ab. Nach ungefähr einer
+    Handvoll guter Treffer bricht sie zusammen.
+ 4. Nimm ihren HALSSCHMUCK (Alexia's Choker) auf
+    und untersuche ihn, um den ROTEN EDELSTEIN
+    (Alexia's Jewel) zu erhalten.
+ 5. Du besitzt schon den BLAUEN Edelstein aus Alfreds
+    Ring. Der GRÜNE Edelstein von Alexander fehlt noch.
+
+13.2  QUADRATISCHES VENTIL UND KRANSCHLÜSSEL
+--------------------------------------------
+ 6. Kehre zur Itembox zurück. Nimm OCTA VALVE HANDLE
+    und SOCKET heraus und kombiniere beide zu
+    SQUARE VALVE HANDLE.
+ 7. Gehe zum großen Wassertank im Technikbereich.
+    Benutze das neue Ventilrad am Anschluss, um
+    den Tank zu entleeren.
+ 8. Betritt den nun leeren Tank und nimm den
+    KRANSCHLÜSSEL (Crane Key).
+ 9. Achte auf einen auftauchenden Sweeper/Hunter.
+10. Begib dich zum vereisten Lagerraum, der von der
+    großen Spinne besetzt ist.
+11. Betätige mit dem Crane Key die Kransteuerung.
+    Alexanders Körper wird aus dem Eis gehoben.
+12. OPTION A (empfohlen): Laufe zur herunterhängenden
+    Leiche, nimm ALEXANDERS OHRRING (Alexander's Pierce)
+    und verlasse den Raum ohne Kampf gegen die Spinne.
+13. OPTION B: Besiege die riesige Spinne mit starken
+    Waffen, bevor du den Ohrring aufnimmst. Das ist
+    möglich, verbraucht aber viel Munition.
+14. Untersuche Alexanders Ohrring im Inventar. Er
+    enthält den GRÜNEN EDELSTEIN (Alexander's Jewel).
+
+13.3  DREI EDELSTEINE INS FAMILIENBILD
+-------------------------------------
+15. Gehe zurück zum Herrenhaus-Hauptsaal und steige
+    die breite Treppe hoch zum Familienbild.
+16. Setze alle drei Edelsteine ein:
+       BLAU = Alfreds Ring
+       ROT  = Alexias Halsschmuck
+       GRÜN = Alexanders Ohrring
+17. Eine Geheimtür hinter dem Porträt öffnet sich.
+    Gehe hindurch.
+18. In einem Zimmer des neuen Bereichs findest du
+    den STERILRAUMSCHLÜSSEL (Sterile Room Key).
+    Nimm ihn aus dem Schreibtisch.
+
+13.4  STROM ABSCHALTEN UND TIGER-AUGEN
+-------------------------------------
+19. Kehre zum Strom-/Sicherungsraum zurück. Schalte
+    den Strom im entsprechenden Teil der Anlage AUS.
+20. Öffne mit dem Sterile Room Key die Verbindung
+    zum roten Gang und zur TIGERSTATUE.
+21. Jetzt, da der Strom abgeschaltet ist, kannst du
+    beide Augen dauerhaft aus dem Tigerkopf nehmen.
+    Nimm den ROTEN und den BLAUEN STEIN.
+22. Gehe wieder durch die Tür hinter dem Familienbild
+    und weiter zum Bereich mit Alfreds und Alexias
+    Schlafzimmern.
+
+13.5  ZWEI MUSIKSCHATULLEN, LIBELLENKÖRPER
+-----------------------------------------
+23. In ALFREDS ZIMMER benutzt du den ROTEN STEIN
+    am Ameisenverschluss der Schatulle.
+24. Stoppe den Mechanismus und nimm die
+    MUSIKPLATTE heraus.
+25. Geh nach ALEXIAS ZIMMER und setze dort den
+    BLAUEN STEIN in die andere Ameisenschatulle.
+26. Lege die Musikplatte in Alexias Schatulle.
+    Der Weg über das Bett und die Leiter öffnet sich.
+27. Steige nach oben. Folge der Galerie in den Raum
+    mit dem großen Ameisenbehälter.
+28. Verschiebe den Tisch und hole den LIBELLENKÖRPER
+    (Dragonfly Object) aus der Einrichtung.
+29. Du solltest aus dem Ameisenlabor und der
+    Karussellzone bereits DREI LIBELLENFLÜGEL
+    besitzen. Kombiniere sie mit dem Körper.
+30. Der VIERTE Flügel liegt in einem Bereich unterhalb
+    der Galerie bei den großen Labor-Kapseln. Nimm den
+    dortigen Lift, betätige den blau beleuchteten Schalter
+    und hole den letzten Wing Object.
+31. Kombiniere alle vier Flügel mit dem Dragonfly
+    Object zur GOLDENEN LIBELLE (Gold Dragonfly).
+
+13.6  SECURITY FILE, REAKTORKERN UND PASSWORT
+--------------------------------------------
+32. Kehre in den Zellenkomplex zurück, in dem Claire
+    zuvor die Kanone benutzt hat.
+33. Chris kann Claire in ihrem eingeschlossenen Raum
+    nicht direkt befreien. Sie schiebt ihm die
+    SECURITY FILE unter der Tür durch.
+34. Untersuche diese Akte im Inventar. Darin befindet
+    sich die benötigte SECURITY CARD bzw. die
+    Freigabeinformation für den Selbstzerstörungsbereich.
+35. Folge der Treppe und Plattform nach oben. Setze
+    die fertige GOLDEN DRAGONFLY in die Halterung
+    an der verriegelten Tür ein.
+36. Betritt den Reaktor-/Steuerraum. Verwende die
+    SECURITY CARD am Terminal, falls verlangt.
+37. Das Passwort zur Selbstzerstörung lautet:
+
+                       V E R O N I C A
+
+38. Gib VERONICA ein. Die Selbstzerstörung startet
+    und der letzte Kampf beginnt.
+
+13.7  ALEXIA: ENDKAMPF, FORM 2 UND FORM 3
+----------------------------------------
+39. In einer Zwischensequenz greift Alexia nach Claire.
+    Sobald du Chris wieder steuern kannst, SOFORT
+    mit der ausgerüsteten Waffe auf Alexia schießen.
+    Sonst stirbt Claire und das Spiel endet.
+40. Alexia nimmt nun eine riesige, festgewachsene
+    Form an. Nutze Magnum-Munition, Granaten,
+    Shotgun und andere verbliebene starke Waffen.
+41. Bleibe möglichst beweglich. Sie greift mit
+    Tentakeln, Säure, Flammen und kleinen Parasiten an.
+    Versuche, nicht zwischen den Nebenwesen und der
+    Hauptgestalt eingeklemmt zu werden.
+42. Konzentriere dein Feuer auf den Boss. Heile dich
+    bei Bedarf, bevor du mehrfach getroffen wirst.
+43. Nach genügend Schaden löst sich der Oberkörper
+    und wird zur FLIEGENDEN DRITTEN FORM.
+44. Jetzt wird die Spezialwaffe LINEAR LAUNCHER
+    freigegeben. Nimm sie aus ihrer Halterung.
+45. Zielen erfolgt in einer besonderen Perspektive.
+    Beobachte, in welche Richtung Alexia fliegt,
+    und halte vor ihr in die Bewegung.
+46. EIN TREFFER mit dem Linear Launcher beendet
+    den finalen Kampf.
+47. Nach der Schlussszene hast du die Hauptgeschichte
+    von Resident Evil CODE: Veronica X durchgespielt.
+
+============================================================
+14 | RÄTSEL-SCHNELLÜBERSICHT
+============================================================
+
+Ort / Rätsel                         Lösung
+-----------------------------------------------------------------
+Gefängnis: Metallscanner             Alle Metallobjekte ablegen.
+Gefängnis: 3D-Kopie                  Hawk Emblem scannen,
+                                     mit TG-01 Kopie herstellen.
+Palast: Computer in Haupthalle       NTC0394
+Palast: Steve in der Luger-Falle     C, E, Bestätigen
+Palast: Musikmechanismus             Links/Rechts, Links,
+                                     Rechts, Rechts x3
+Palast: Computer nach Musik          1971
+Ausbildungsanlage: Laborcode         1126
+Diorama: Skelettbild                 In die freie Bildstelle.
+Porträtzimmer: Sieben Bilder         Frau, Mann mit Babys,
+                                     Teetasse, Teller, Papier,
+                                     Mann in Blau/Kerzen,
+                                     großes Hauptbild.
+Gefängnis: Statue mit Schwert        Schwert nehmen,
+                                     Mittelstatue drehen,
+                                     Schwert in Eisenfigur.
+Palast: Casino                       Pianorolle im Klavier.
+Privatresidenz                       Queen Ant bei Alexia;
+                                     King Ant bei Alfred;
+                                     Musikplatte übertragen.
+Flughafen: Plattform                 Navy + Army + Air Force.
+Flughafen: Startbrücke                Control Lever verwenden.
+Chris: Schubladen                    ROT, GRÜN, BLAU, BRAUN.
+Chris: Kühlschrank                   12.8
+Chris: Ölmengenrätsel                3, 3, 3, 3, 10, 3, 5
+Chris: Diorama                       Drei Proofs einsetzen.
+Antarktis: Paketförderer             Barcode auf Paket,
+                                     Anlage einschalten.
+Antarktis: Ventil                    Am Werkzeugtisch umformen.
+Antarktis: Kapsel Alfred             AA, Krone, Herz, Pik;
+                                     Paper Weight einsetzen.
+Antarktis: Kanone/Steinblock         Kristall darunter ablegen,
+                                     sofort ausweichen.
+Antarktis: Familienporträt           Grün + Blau + Rot.
+Antarktis: Tigerkopf                 Strom für dauerhafte
+                                     Entnahme ausschalten.
+Antarktis: Libelle                   Körper + vier Flügel.
+Antarktis: Selbstzerstörung          VERONICA
+
+============================================================
+15 | ABZWEIGUNGEN, ALTERNATIVE WEGE UND OPTIONALE FUNDE
+============================================================
+
+15.1  PALAST ODER FLUGHAFEN ZUERST?
+----------------------------------
+Sobald du das U-Boot öffnen kannst, besuche zuerst den Flughafen,
+um Biohazard Card und Plattform vorzubereiten. Danach kehre zur
+Ausbildungsanlage zurück. Die Abzeichen kannst du nach und nach
+am Flughafen einlegen oder zusammen am Ende mitbringen.
+
+15.2  RODRIGO ODER BILDERRÄTSEL ZUERST?
+---------------------------------------
+Rodrigo kannst du versorgen, sobald das Hemostatic gefunden wurde.
+Die Route in dieser Lösung verbindet den Besuch mit dem späteren
+Gefängnis-Nebenweg. Wenn du lieber unmittelbar nach dem Fund zu
+Rodrigo zurückläufst, geht das ebenfalls und gibt dir den
+Dietrich früher. Das ist ein guter alternativer Ablauf.
+
+15.3  KANN ICH DEN GULP WORM IGNORIEREN?
+---------------------------------------
+Als Claire auf dem frühen Platz: ja, einfach ins Gebäude laufen.
+Als Chris in der Höhle: Besiegen ist der Weg, um Rodrigo und
+sein Feuerzeug zu bekommen. Für zusätzliche Waffen sehr sinnvoll.
+
+15.4  MUSS ICH ALLE KOFFER ÖFFNEN?
+--------------------------------
+Nein. Für die Haupthandlung nicht. Der Koffer mit den M93R-Teilen
+ist dennoch empfehlenswert; andere Koffer liefern weitere
+Munition. Dietrich und Koffer gehören zu Claires optionalen
+Errungenschaften.
+
+15.5  MUSS ICH DEN ALBINOID ODER DIE RIESENSPINNE TÖTEN?
+-------------------------------------------------------
+Der ausgewachsene Albinoid kann aus sicherer Entfernung
+bekämpft werden. Ein sehr schneller Vorstoß zum benötigten
+Objekt ist alternativ möglich.
+Die riesige Spinne am gefrorenen Lager ist für die Haupthandlung
+nicht zwingend zu töten. Hol Alexanders Schmuck und verlasse
+den Bereich.
+
+15.6  UNVERZICHTBARE WAFFEN UND EMPFOHLENE RESERVEN
+---------------------------------------------------
+- Bow Gun: Früh bei Claire in der Ausbildungsanlage.
+- Grenade Launcher: Claires Kellerroute mit Emblem Card.
+- M-100P: Im Gefängnisschlafraum nach dem Zombieangriff.
+- Submachine Guns: Später optional bei Chris mit Feuerzeug.
+- Magnum: Optional, aber enorm hilfreich. Nur mit dem
+  aufgehobenen und wieder aufgefüllten Feuerlöscher erreichbar.
+- Sniper Rifle: Nach Alfreds Sturz vor Nosferatu mitnehmen.
+- Shotgun: Für Chris an der Wandhalterung im Untergeschoss.
+
+15.7  VOR DEM WECHSEL ZU CHRIS
+----------------------------
+Claire sollte nach ihrem Antarktis-Boss nicht alle starken
+Waffen oder Heilmittel in ihrem persönlichen Inventar behalten.
+Eine sichere Grundregel: Bow Gun/Granatwerfer plus Munition, die
+Chris verwenden soll, in der Itembox lassen. Besonders wichtig:
+Ein Boss sollte nie dazu führen, dass sämtlicher Vorrat an
+guten Heilitems bei der nicht mehr steuerbaren Figur liegt.
+
+15.8  VOR DEM LETZTEN CLAIRE-ABSCHNITT
+-------------------------------------
+Claire benötigt im Abschnitt mit Steve vor allem starke
+HEILUNG. Ein paar Plätze mit Waffen sind weniger wichtig als
+mehrere Heilmittel. Chris muss dagegen anschließend mit
+Magnum, Granatwerfer oder Shotgun den Endkampf bestreiten.
+Rüste also nicht beide Figuren gleichzeitig aus demselben
+Vorrat leer.
+
+============================================================
+16 | BOSS-KURZREFERENZ
+============================================================
+
+GULP WORM (Claire):
+   Frühe Begegnung auslassen und zur Tür rennen.
+
+BANDERSNATCH:
+   Abstand halten, explosive Pfeile oder M-100P/Granaten.
+
+TYRANT 1 (Rockfort-Flucht):
+   Ausweichen, starke Munition, freie Passage erreichen.
+
+TYRANT 2 (Flugzeug):
+   Mit explosiven Pfeilen/Granaten schwächen, dann
+   Fracht-Auswurfknopf benutzen. Nicht zu früh auslösen.
+
+NOSFERATU:
+   Auf dem Helideck nicht am Rand stehen, Herz mit dem
+   Sniper Rifle treffen. Giftnebel möglichst vermeiden.
+
+GULP WORM (Chris):
+   Auftauchen abwarten, hart treffen; Rodrigo befreien.
+
+ERWACHSENER ALBINOID:
+   Stromangriff im Wasser vermeiden. Vom Rand schießen
+   oder kurz ins Becken und das Objekt greifen.
+
+RIESENSPINNE:
+   Optionaler Kampf. Für die Geschichte Schmuck holen.
+
+MUTIERTER STEVE:
+   Nicht schießen, SOFORT zum Ausgang laufen, nach
+   Treffern heilen.
+
+ALEXIA 1:
+   Sofortiger Tod durch Nahkontakt möglich. Distanz halten,
+   Magnum benutzen.
+
+ALEXIA 2:
+   Vorab Claire mit einem Schuss retten, danach die große
+   Gestalt mit starken Waffen angreifen.
+
+ALEXIA 3:
+   Linear Launcher nehmen. Flugbahn vorhalten. Ein Treffer.
+
+============================================================
+17 | CHECKLISTEN GEGEN VERPASSTE GEGENSTÄNDE
+============================================================
+
+17.1  CLAIRE VERLÄSST ROCKFORT: LETZTE KONTROLLE
+------------------------------------------------
+[ ] Leeren Feuerlöscher nicht im Metalldetektor vergessen.
+[ ] Leeren Feuerlöscher in eine normale Itembox gelegt.
+[ ] Hemostatic aus dem Speicherraum geholt.
+[ ] Hemostatic an Rodrigo übergeben und Lockpick erhalten.
+[ ] Dietrich-Koffer mit M93R-Teilen geöffnet (optional).
+[ ] Grenade Launcher aus dem Keller geholt.
+[ ] Bow Gun und explosive Pfeile gesichert.
+[ ] Navy Proof eingesammelt.
+[ ] Army Proof eingesammelt.
+[ ] Air Force Proof eingesammelt.
+[ ] Side Pack im U-Boot geholt.
+[ ] Tyrant-Kampf im Flugzeug mit Reserven vorbereitet.
+
+17.2  CLAIRE VERLÄSST ANTARKTIS: LETZTE KONTROLLE
+-------------------------------------------------
+[ ] Sniper Rifle vor Nosferatu eingesammelt.
+[ ] Nach Möglichkeit Gift von Nosferatu vermieden.
+[ ] Starke Waffen/Munition für Chris in die Itembox gelegt.
+[ ] Feuerlöscher liegt weiterhin in einer Itembox.
+
+17.3  CHRIS VERLÄSST ROCKFORT: LETZTE KONTROLLE
+-----------------------------------------------
+[ ] Glock in der Waffenwerkstatt verbessert (optional).
+[ ] Rote/grüne/blaue/braune Schubladen geöffnet (optional).
+[ ] Luger Replica eingepackt oder in Itembox (Battle Game).
+[ ] Clement α und Clement Σ kombiniert.
+[ ] Heeres-/Marine-/Luftwaffen-Proofs aus dem Airport geholt.
+[ ] Adlerplatte vom Albinoid besorgt.
+[ ] Hellebarde hergestellt.
+[ ] Genügend Heilmittel und schwere Munition vorhanden.
+
+17.4  CHRIS VOR DEM FINALE
+-------------------------
+[ ] Magnum abgeholt, wenn Feuerlöscher verfügbar war.
+[ ] Alfreds Ring und seinen blauen Stein geholt.
+[ ] Alexias Halsschmuck und ihren roten Stein geholt.
+[ ] Alexanders Ohrring und seinen grünen Stein geholt.
+[ ] Drei Steine ins Familienbild eingesetzt.
+[ ] Beide Augen am Tigerkopf nach Stromabschaltung geholt.
+[ ] Dragonfly Object und vier Flügel kombiniert.
+[ ] Security File / Security Card erhalten.
+[ ] Starke Waffen und mindestens 2 Heilungen für Finale.
+
+============================================================
+18 | FEHLERBEHEBUNG: WENN DU FESTHÄNGST
+============================================================
+
+F: Der Metalldetektor schlägt immer an.
+A: Prüfe alle Inventarplätze auf Metallsachen. Beachte beide
+   Ablagefächer. Für das Tor brauchst du die Kopie aus TG-01,
+   nicht das Originalemblem.
+
+F: Ich habe den Feuerlöscher benutzt. Ist die Magnum verloren?
+A: Nein, wenn du den LEEREN Feuerlöscher aufbewahrt hast.
+   Chris kann ihn in der Antarktis erneut füllen. Liegt er
+   dagegen unerreichbar zurück, ist die Magnum möglicherweise
+   auf dem aktuellen Durchlauf verpasst.
+
+F: Ich komme durch die Tür mit den goldenen Pistolen nicht.
+A: Du brauchst die Gold Lugers von Steve. Erst retten,
+   anschließend in der Ausbildungsanlage die Ingrams gegen
+   die Lugers tauschen und die beiden Pistolen in die
+   Türvertiefungen im Palast einsetzen.
+
+F: Das Labor ist durch die Sicherheitstür gesperrt.
+A: Erst Biohazard Card/Emblem Card besorgen, die Kamera im
+   anderen Labor auf das Skelettbild ausrichten und dann
+   an der passenden Tür 1126 eingeben.
+
+F: Der Familienbilder-Raum nimmt meine Eingaben nicht an.
+A: Kontrolliere die Reihenfolge der sieben Bilder in Kapitel
+   05.1. Unterschiedliche rote Haare sind bei den zwei
+   mittleren Männern leicht zu verwechseln.
+
+F: Der Flughafen-Lift funktioniert nicht.
+A: Erst die Brücke mit dem Control Lever anheben, den Airport
+   Key holen, das Rolltor öffnen und die Kisten richtig
+   unter den Mechanismus schieben.
+
+F: Der Tyrant im Frachtraum stirbt nicht.
+A: Nicht nur schießen. Verwende den Auswurfmechanismus und
+   schwäche den Tyrant vorher. Explosive Pfeile sind ideal.
+
+F: Ich finde die Gasmaske nicht.
+A: Barcode im B.O.W.-Raum holen, auf das Paket im Lager kleben,
+   Strom und Förderband anschalten. Danach Gasmaske im
+   B.O.W.-Raum hinter dem geöffneten Fach entnehmen.
+
+F: Chris hat keine Magnum.
+A: Schau, ob Claire den leeren Feuerlöscher in die Itembox
+   gelegt hat. Fülle ihn beim Wassertank neu und lösche
+   das Feuer im unteren Waffendepot.
+
+F: Die Clement-Flaschen lassen sich nicht kombinieren.
+A: Benötigt werden Clement α aus der Waffenwerkstatt und
+   Clement Σ aus dem auf 12.8 eingestellten Kühlschrank.
+
+F: Nach dem Porträt fehlen noch ein oder zwei Edelsteine.
+A: Blau: Alfreds Ring aus der Kapsel. Rot: Alexias Choker
+   nach Kampf 1. Grün: Alexanders Pierce am Kran/Eisfeld.
+   Alle drei Schmuckstücke im Inventar untersuchen.
+
+F: Für die Libelle fehlt ein Flügel.
+A: Einen im Ameisen-Labor, zwei am Karussell/Garten und
+   einen im Kapsel-/Forschungsbereich unter der Galerie
+   suchen. Erst mit allen vieren wird sie zum Schlüssel.
+
+F: Die Schatullen in der Antarktis lassen sich nicht öffnen.
+A: Den Strom abschalten, um beide Tiger-Augen dauerhaft
+   herauszunehmen. Dann die Augen an die Ameisenverschlüsse
+   der passenden Schatullen setzen.
+
+F: Bei Steve sterbe ich sofort.
+A: Voll heilen, HEILMITTEL einpacken, nicht kämpfen.
+   Direkt am Monster vorbei zum Ausgang laufen und nach
+   jedem Treffer sofort erneut heilen.
+
+F: Ich habe den Endkampf gestartet und Claire stirbt.
+A: Am Beginn der Endsequenz SOFORT einen Schuss auf Alexia
+   abgeben. Erst danach beginnt der eigentliche Bosskampf.
+
+============================================================
+19 | QUELLEN UND VERSIONSHINWEISE
+============================================================
+
+Diese Datei ist eine eigenständig formulierte Anleitung,
+aufgebaut und abgeglichen anhand mehrerer frei lesbarer
+Lösungs- und Rätselübersichten. Keine wörtliche Übernahme
+einer fremden Komplettlösung.
+
+Hilfreiche Referenzen für Raumkarten, Fundorte und weitere
+optionale Sammlerstücke:
+
+  Achievement Guides, Resident Evil Code: Veronica X
+  https://achievementguides.com/guides/resident-evil-code-veronica-x
+
+  Mogelpower, deutschsprachiger Walkthrough
+  https://www.mogelpower.de/cheats/loesung.php?id=17394
+
+  GIGA / spieletipps, Komplettlösung in Spielabschnitten
+  https://www.giga.de/tipp/resident-evil-code-veronica-x-komplettloesung/
+
+  StrategyWiki, Kapitelübersicht
+  https://strategywiki.org/wiki/Resident_Evil_Code:_Veronica_X
+
+  Neoseeker, umfangreiche englischsprachige FAQs
+  https://www.neoseeker.com/resident-evil-code-veronica-x/faqs/244355-hd.html
+
+Hinweis: Resident Evil CODE: Veronica und CODE: Veronica X
+haben im Kern dieselbe Rätsel- und Kampagnefolge. Plattform,
+Sprachausgabe, Benennungen, Einblendungen und bestimmte
+Bonusbedingungen können abweichen. Dieser Guide zielt auf
+einen normalen vollständigen STORY-Durchlauf, nicht auf alle
+Trophäen oder einen garantierten A-Rang-Speedrun.
+
+ENDE DER KOMPLETTLÖSUNG
+============================================================

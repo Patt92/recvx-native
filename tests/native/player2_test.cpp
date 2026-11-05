@@ -199,6 +199,21 @@ static void npc_combat(const std::filesystem::path& data){
     world.tick_enemy_pass();int hp=0;for(const auto& target:world.combat_targets())hp+=target.hp;
     check(hp<initial_hp,"native NPC knife hit did not affect original enemy HP");
     std::cout<<"NPC native knife hit on original RM_0080 enemy after "<<t<<" ticks, Player 1 isolation PASS\n";
+    {   // Firearm ammo rule: an empty magazine without spare rounds never fires (no empty clicks, no engagement);
+        // with spare rounds the attack press runs the original reload (bhCPM2_act_rld) and the NPC shoots afterwards.
+        auto empty=std::make_shared<Player2Progress>(1);empty->equipment.items.fill(0);empty->equipment.wpnr_no=0;empty->equipment.acquire(5,0);empty->equipment.equip(empty->equipment.search(5));
+        world.enable_player2(Player2Mode::Npc,secondary,spawn,1,empty);
+        check(empty->equipment.weapon()>=3&&!empty->equipment.reload_available(),"empty firearm fixture");
+        for(unsigned k=0;k<200;++k){world.tick_enemy_pass();world.tick_player2({},true);world.tick_after_player();}
+        check(world.player2_progress()->attacks==0&&world.player2_progress()->decision!="attack"&&world.player2_progress()->decision!="aim","empty firearm without spare rounds still engaged or fired");
+        unsigned ammo=0;for(unsigned id=1;id<60&&!ammo;++id){Inventory probe=empty->equipment;if(probe.acquire(id,30)&&probe.reload_available())ammo=id;}
+        check(ammo!=0,"no spare ammunition item for the fixture firearm");
+        check(empty->equipment.acquire(ammo,30)&&empty->equipment.reload_available(),"spare rounds not accepted");
+        const auto before=empty->equipment.items;unsigned k=0;for(;k<400&&world.player2_progress()->attacks==0;++k){world.tick_enemy_pass();world.tick_player2({},true);world.tick_after_player();}
+        const auto rounds=Inventory::quantity(empty->equipment.slots()[empty->equipment.slots()[0]]);
+        check(world.player2_progress()->attacks>0&&empty->equipment.items!=before&&rounds>0,"spare rounds did not reload through the original attack press");
+        std::cout<<"NPC firearm: no fire on an empty magazine, original reload with spare rounds after "<<k<<" ticks PASS\n";
+    }
 }
 static void enemy_binding(const std::filesystem::path& data){
     // Host binding of the enemy mechanisms to Player 2 in RM_0031, whose free zombies (type 0, mode0 1) bite the

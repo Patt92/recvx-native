@@ -335,6 +335,19 @@ bool Inventory::count_bullet(){
     entry=(entry&0xffff0000u)|std::uint16_t(next);
     return true;
 }
+bool Inventory::reload_available()const{
+    const unsigned max=side_pack?10:8;
+    const auto equipped=slots()[0];if(equipped>=12)return false;
+    unsigned wpn=id(slots()[equipped]);
+    if(wpn==7&&(flags_of(slots()[equipped])&0x2000))wpn=155;
+    for(unsigned i=0;i<max;++i){
+        const unsigned ammo=id(slots()[i+2]);
+        if(!(type_of(ammo)&0x2)||itemdata[ammo].cmb<0)continue;
+        unsigned pos=unsigned(itemdata[ammo].cmb);unsigned count=unsigned(combidata[pos]);++pos;
+        for(;count;--count,pos+=3)if(unsigned(combidata[pos])==wpn&&(combidata[pos+2]&0xf000))return true;
+    }
+    return false;
+}
 bool Inventory::reload(){
     // bhSearchBullet (Grenze gm_flg 0x8000000 laut Disassembly, siehe Vertrag).
     const unsigned max=side_pack?10:8;

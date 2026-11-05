@@ -80,14 +80,14 @@ void TradeMenu::input(MenuInput key,Inventory& primary,RoomWorld& world){
 void TradeMenu::draw(SoftwareRenderer& image,const GameUi& ui,const Inventory& primary,const RoomWorld& world)const{
     if(active_&&world.player2_progress())ui.draw_trade(image,primary,world.player2_progress()->equipment,world.player2_mode()==Player2Mode::Npc,pane_,cells_,selecting_,source_pane_,source_cell_,message_?std::string(" "):actions_?std::string("OK: confirm action    Back: cancel"):note_);
     if(!active_)return;
-    if(message_){auto text=message_text(ui.system_message(message_));while(!text.empty()&&ui.label_width(text,.43f)>584)text.pop_back();ui.label(image,text,26,426,.43f,0xffd4dba8,.43f);}
+    if(message_){auto text=message_text(ui.system_message(message_));if(text.size()>52)text.resize(52);ui.ascii(image,text,44,392,.55f,0xffd4dba8);}
     if(actions_&&world.player2_progress()){
         const auto& equipment=world.player2_progress()->equipment;const auto at=slot(equipment,cells_[1]);const auto id=Inventory::id(equipment.slots()[at]);
         const std::string command=id<156&&(itemdata[id].type&1u)?(equipment.slots()[0]==at?"UNEQUIP":"EQUIP"):"USE";
-        const int x=std::max(0,(image.width()-640)/2)+350;
+        const int x=std::max(0,(image.width()-640)/2)+230; /* between the two grids */
         const bool reload=reload_option(equipment,at);const unsigned count=reload?3u:2u;
-        for(int y=200;y<200+int(count)*37+18;++y)for(int dx=0;dx<234;++dx)image.canvas()[y*image.width()+x+dx]=0xff16262d;
-        for(unsigned i=0;i<count;++i){const auto label=i==0?command:i==count-1?std::string("BACK"):std::string("RELOAD");ui.label(image,label,x+18,215+int(i)*37,.7f,action_cursor_==i?0xffe5edbc:0xff718c92,.7f);}
+        for(int y=196;y<196+int(count)*34+20;++y)for(int dx=0;dx<190;++dx)image.canvas()[y*image.width()+x+dx]=(y<198||y>=196+int(count)*34+18||dx<2||dx>=188)?0xff8c8a6a:0xff101010; // host command box in the status-screen colours
+        for(unsigned i=0;i<count;++i){const auto label=i==0?command:i==count-1?std::string("BACK"):std::string("RELOAD");ui.ascii(image,label,x+16,208+int(i)*34,.7f,action_cursor_==i?0xff60c0ff:0xffd8d8d8);}
     }
 }
 }

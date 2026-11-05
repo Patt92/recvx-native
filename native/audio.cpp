@@ -466,7 +466,32 @@ void AudioMixer::load_room_sounds(unsigned stage,unsigned room,unsigned variant)
         else{if(type==1)midi_programs_[bank]=section;else midi_sequences_[bank]=section;
             const auto pr=midi_programs_.find(bank);const auto sq=midi_sequences_.find(bank);iop_.load_midi_bank(bank,pr==midi_programs_.end()?AudioBank{}:pr->second,sq==midi_sequences_.end()?AudioBank{}:sq->second);}}
     if(!terminated)throw std::runtime_error("unterminated room sound pack");room_pack_=pack;
+    if(companion_voice_player_>=0&&!room_banks_.count(5))load_companion_sounds(unsigned(companion_voice_player_)); // host companion voice survives the room pack
     current_room_fx_level_=room_env_.fx_level; // SetRoomSoundFxLevelEx at the pack terminator; per-slot FxLev is empty on PS2 (ps2_sg_sd.c:542/966)
+}
+bool AudioMixer::load_companion_sounds(unsigned player){
+    if(player>3)throw std::runtime_error("invalid companion voice bank");
+    companion_voice_player_=int(player);
+    if(room_banks_.count(5)&&sound_bank_packs_.count(5)&&sound_bank_packs_[5]<0xfff0u){unavailable.push_back("companion voice: SE bank 5 taken by the room pack");return false;}
+    if(data_.empty())return false;
+    const auto index=read_asset_file(data_/("files/MULTSPQ"+disc_digit()+".IDX"),4096);BinaryView ids(index);
+    unsigned pack=0;bool found=false;
+    for(;pack<index.size()/2;++pack){const auto key=ids.u16(pack*2);if(key==0xffff)break;if(key==(0xfff0u|player)){found=true;break;}}
+    if(!found){unavailable.push_back("companion voice CORE/"+asset_number(player)+": pack missing");return false;}
+    auto file=mods_/("audio/MULTSPQ"+disc_digit())/(asset_number(pack)+".bin");
+    if(mods_.empty()||!std::filesystem::is_regular_file(file))file=data_/("archives/MULTSPQ"+disc_digit())/(asset_number(pack)+".bin");
+    const auto bytes=read_asset_file(file,32*1024*1024);BinaryView v(bytes);bool loaded=false;
+    for(unsigned i=0;i<16;++i){const auto p=i*16,offset=v.u32(p);if(!offset)break;const auto size=v.u32(p+4);v.require(offset,size);
+        if(v.u32(p+8)==2&&v.u32(p+12)==4){room_banks_[5]=std::make_shared<const std::vector<std::uint8_t>>(bytes.begin()+offset,bytes.begin()+offset+size);sound_bank_packs_[5]=0xfff0u|player;iop_.load_se_bank(5,room_banks_[5]);loaded=true;}}
+    if(!loaded)unavailable.push_back("companion voice CORE/"+asset_number(player)+": voice bank missing");
+    return loaded;
+}
+void AudioMixer::play_companion_voice(int se_no){
+    if(companion_voice_player_<0||!room_banks_.count(5)){play_player_voice(se_no);return;} // same character or no bank: the primary voice bank
+    auto request=setup_se_generic(7,player_pos_);if(!(se_3d_flag(7)&2))request.volume=std::int8_t(request.volume+room_env_.player_voice);
+    try{if(!play_room_sound(5,unsigned(se_no)&255,7))unavailable.push_back("companion voice "+std::to_string(se_no));
+        else{apply_se_pan(7,request.pan_default?0:request.pan);apply_se_volume(7,request.volume_default?0:request.volume);}}
+    catch(const std::exception& error){unavailable.push_back("companion voice "+std::to_string(se_no)+": "+error.what());}
 }
 bool AudioMixer::load_player_sounds(unsigned player){
     if(player>3)throw std::runtime_error("invalid player voice bank");

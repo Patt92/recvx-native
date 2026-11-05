@@ -462,7 +462,7 @@ if(RECVX_BUILD_RUNTIME)
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_no_original_core.py"
       "${CMAKE_CURRENT_SOURCE_DIR}" --build-dir "${CMAKE_CURRENT_BINARY_DIR}" --binary "${recvx_runtime_audited}" ${recvx_runtime_audit_nm}
     VERBATIM)
-  add_library(recvx_input native/netplay.cpp native/trade_menu.cpp native/input.cpp native/frontend.cpp native/debug_menu.cpp native/third_person.cpp native/video_settings.cpp native/audio_settings.cpp native/vibration.cpp)
+  add_library(recvx_input native/host_process.cpp native/netplay.cpp native/trade_menu.cpp native/input.cpp native/frontend.cpp native/debug_menu.cpp native/third_person.cpp native/video_settings.cpp native/audio_settings.cpp native/vibration.cpp)
 if(WIN32)
   target_link_libraries(recvx_input PUBLIC ws2_32)
 endif()

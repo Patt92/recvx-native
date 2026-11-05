@@ -34,7 +34,10 @@ with its own keyboard or controller. Details, limits and validation in [NETPLAY.
 
 With an active partner nearby, **Shift+Tab** or **L1/LB + Inventory** (Triangle/Y
 by default) opens **ITEM EXCHANGE**. Both bags appear side by side. Left/Right
-moves through columns and across the panel edge. Confirm selects a source,
+moves through columns and across the panel edge. The window uses the original
+status-screen skin: background plate, two ItemSet grids (Player 1 at its
+original place, the partner 416 px to the left), the original item cursor,
+condition sprite, HP and item names in the message font. Confirm selects a source,
 then a destination in the other bag; Confirm again places, stacks or swaps.
 Selecting an empty source retrieves the other item. Cancel returns to source
 selection or closes the window. Inventory or the trade chord closes it too.
@@ -90,8 +93,10 @@ there is no guessed spawn
 offset. `--player2-spawn <index>` selects a room POS entry for diagnostics and
 requires that index to exist in every room visited during that run.
 
-The debug menu's **Player 2** row switches Off / Local player / NPC follow + fight
-when the run was started with Player 2 enabled. The World API also provides
+The debug menu's **Player 2** row switches Off / Local player / NPC follow + fight;
+enabling it in a run started without Player 2 loads the model and reloads the
+room. A companion of another character speaks from its own CORE voice pack,
+loaded into SE bank 5 (host extension; the room packs leave that bank free). The World API also provides
 `set_player2_mode` and `set_player2_driver`. An NPC driver receives the current
 `RoomWorld` as a read-only view and returns `Player2Command` (move, turn, run,
 aim, attack). With no custom driver, the built-in companion follows and fights.
@@ -106,6 +111,14 @@ subplayers and invulnerable entry/death states are excluded. The original room
 route table supplies intermediate destinations when direct body passage is
 blocked. Missing or obstructed routes produce `blocked-route`; the NPC waits
 instead of walking through walls. This is not universal room navigation.
+When the leader stands on another floor, the NPC walks to the nearest stair
+area of its floor (rom->etcp type 1/2, entered through a reachable edge with a
+one-unit probe) and runs the original step action from the same probe table
+as Player 1's `bhCheckExmAtari` branch (`player2_stairs_begin/tick`, the C
+module `player_stairs.c` on its own tree). The room-table mark
+`bhSetUseKaidanFlag` is not written for the companion. Blood and other
+enemy effects linked to the struck player attach to Player 2's tree (effect
+link kind 0, index 1) when it was the target.
 
 The same `RoomWorld::npc_ai` decision also serves AI play for Player 1 (debug
 row **Player AI**, `--player-ai`): no leader, so it only engages; firearms use a
@@ -118,8 +131,11 @@ It starts a new swing in native ready mode 65 and releases attack during the
 swing. There is no proximity damage or independent hit timer. Human Player 2
 uses that same combat path. Linked firearm effects and secondary camera modes
 remain open. The initial weapon is a knife; supplied firearms use the partner's
-own lock table, target cycling and ammunition. Empty magazines use the native
-reload operation on the partner bag.
+own lock table, target cycling and ammunition. An empty magazine reloads through
+the original attack press (`bhCPM2_act_rld` with its animation) when the bag
+holds matching rounds; without rounds or spare rounds the NPC does not engage
+and never presses an empty trigger. A target whose joints lie below 6 units
+over its ground gets the original low aim (pad down).
 
 **The NPC never picks up items.** No companion command can invoke interaction,
 pickup, item granting or story tasks. This includes all key items; supplies may
@@ -250,7 +266,8 @@ and ordinary escorted doors are not counted as forced teleports.
 
 ## Open scope
 
-EN14/EN09 player links, actor-to-actor collision, equipment/use UI,
+Ladders and the type-2/danf step branches (dnu/dnd/hsu/hsd, bound but unverified
+in a room), actor-to-actor collision, equipment/use UI,
 interaction, foot anchoring, stairs/ladders, pushing, environmental reactions, linked extra
 models (including Claire's hair), face/head control, shadows/mirrors and
 character-specific SFX/water effects still require Player-2 bindings. Reached

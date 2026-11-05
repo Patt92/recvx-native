@@ -55,6 +55,7 @@ public:
     static unsigned weapon_number(std::uint32_t entry,unsigned previous);
     bool equip(unsigned slot);
     bool reload(); // sub1.c bhSearchBullet / Combi_99 / ItemSort.
+    bool reload_available()const; // the search half of bhSearchBullet without the combination (host AI decision)
     bool count_bullet(); // weapon.c bhCountBullet; signed 16-bit count, preserves ID/flags.
     bool acquire(unsigned item,unsigned quantity,unsigned flags=0);
     // Host debug catalog: 256 + file index grants itm[383], normal IDs grant

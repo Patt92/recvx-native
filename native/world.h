@@ -23,6 +23,7 @@
 #include "player_head.h"
 #include "player_action.h"
 #include "player2.h"
+#include "player_stairs.h"
 #include "view_clip.h"
 #include <deque>
 #include <set>
@@ -534,6 +535,7 @@ public:
     bool player2_present()const;
     unsigned enemy_target()const{return enemy_target_;}
     bool player2_driven()const{return player2_&&player2_->driven;}
+    bool player2_on_stairs()const{return player2_&&player2_->stairs.active;}
     int player2_floor()const{return player2_?player2_->floor:0;}
     unsigned player2_targeted()const{unsigned n=0;for(const auto& t:enemy_targets_)n+=t.second==1u;return n;}
     bool damage_player2(int amount);
@@ -976,6 +978,7 @@ private:
         std::int32_t ct0=0,ct1=0,ayp=0,mtn_add=0;unsigned at_flags=0,lever=0,enemy_owner=0,mtn_md=0,pad_full=0;
         bool enemy_motion=false,driven=false,collapse_pending=false;const RECVX_ENEMY_WORK* enemy_work=nullptr;const RECVX_ENEMY_WORK* driver=nullptr;
         BoneMatrix link_matrix{};bool link_valid=false; // PlayerLink root of this actor while an enemy carries it
+        RECVX_STAIR_STATE stairs{};bool foot_switch=false;std::optional<unsigned> stair_goal; // original step/ladder action on this actor (player_stairs.c)
     };
     std::optional<Player2> player2_;
     // Which bound player the running enemy work sees (0 = Player 1, 1 = Player 2); chosen per pass in begin_enemy_pass.
@@ -990,7 +993,7 @@ private:
     unsigned target_character()const{return enemy_target_==1u&&player2_?player2_->character:player_character_;}
     MotionActor target_motion_actor();
     void begin_enemy_pass(RECVX_ENEMY_WORK* w);const MotionClip* player2_enemy_clip()const;int player2_set_motion_now(int add,const MotionClip*& clip);
-    void player2_driven_tick();void player2_damage_tick();bool player2_targetable()const;void player2_incapacitate();void player2_apply_hp(int hp);
+    void player2_driven_tick();void player2_damage_tick();bool player2_stairs_begin();void player2_stairs_tick();bool player2_targetable()const;void player2_incapacitate();void player2_apply_hp(int hp);
     Player2Driver player2_driver_;
     std::set<std::string> player2_gaps_;
     std::filesystem::path player2_data_,player2_mods_;

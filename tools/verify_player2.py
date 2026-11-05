@@ -97,6 +97,17 @@ def main():
     single = run('save-1p', 'off', '0 debug_key F2\n0 debug_select snapshot_save 1\n0 confirm\n', frames=3, extra=('--snapshots', str(snaps)))
     back = run('load-1p', 'npc', '0 debug_key F2\n0 debug_select snapshot_load 1\n0 confirm\n2 debug_key F2\n', frames=6, extra=('--snapshots', str(snaps)))
     assert back['player2']['mode'] == 'off', ('single-player save kept the companion on', back['player2'])
+    # Debug menu enables the companion in a runtime started without --player2 (model loads, room reloads).
+    enabled = run('debug-enable', 'off', '0 debug_key F2\n0 debug_select player2 2\n0 confirm\n2 debug_key F2\n', frames=8)
+    assert enabled.get('player2', {}).get('mode') == 'npc' and enabled['player2_model'] == 11, enabled.get('player2')
+    # Companion voice: the bitten Chris companion speaks from its own CORE voice pack in SE bank 5.
+    assert any('/5/' in a for a in bitten['audio_played']) and not any('companion' in u for u in bitten['audio_unavailable']), (bitten['audio_played'][:8], bitten['audio_unavailable'][:4])
+    # Stairs (RM_0050, rom->etcp type 1 areas 3/4): the NPC follows the leader to the other floor through the
+    # original step actions kdd/kdu (bhCPM2_act_kdd/kdu on the secondary actor), down and up.
+    down = run('stairs-down', 'npc', '0 position -186 0 100 0\n0 player2_position -172 8 86 16384\n', frames=60, room='RM_0050.RDX')
+    assert down['player2']['floor'] == 0 and down['player2']['position'][1] == 0 and down['player2']['motion'] == 42, ('NPC did not descend', down['player2'])
+    up = run('stairs-up', 'npc', '0 position -172 8 86 16384\n0 player2_position -187 0 88 49152\n', frames=90, room='RM_0050.RDX')
+    assert up['player2']['floor'] == 2 and abs(up['player2']['position'][1] - 8) < .5, ('NPC did not climb', up['player2'])
     # EN04 dogs (RM_1000): Player 1 at the spawn wakes dog 1 through its trigger area, the dog then jumps the nearer
     # Player 2 on open ground; bhCPM0_damage runs on the secondary actor (hit reaction, no gap), Player 1 untouched.
     dog = run('dog-jump', 'local', '0 player2_position 120 0 80 0\n', frames=500, extra=bite_options, room='RM_1000.RDX')
@@ -120,7 +131,7 @@ def main():
     (out / 'view.bmp').unlink(missing_ok=True)
     run('view', 'local', '0 player2_keys right\n20 player2_keys forward\n40 player2_keys none\n',
         frames=40, extra=('--screenshot', str(out / 'view.bmp')))
-    print('Player 2 runtime: follow, real enemy knife damage, immutable 1-HP crouch, mortal local player, menu hold, mode switches, Player AI auto-fight/yield, enemy bite binding, dog jump reaction and two-player save files PASS')
+    print('Player 2 runtime: follow, real enemy knife damage, immutable 1-HP crouch, mortal local player, menu hold, mode switches, Player AI auto-fight/yield, enemy bite binding, dog jump reaction, stairs down/up and two-player save files PASS')
 
 
 if __name__ == '__main__':

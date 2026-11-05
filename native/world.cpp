@@ -5058,6 +5058,7 @@ std::optional<BoneMatrix> RoomWorld::link_matrix(unsigned kind,unsigned index,un
     // bhControlPlayer rewrites it in the same frame (game.c:47), so resolving
     // mtn_no here looks the grab motion up in the player library.  The native
     // enemy branch below already works from its committed owP the same way.
+    if(!kind&&index==1u&&player2_){const auto joints=player2_->asset->script_nodes(player2_->work.own_models.at(0).owp_mtx);if(node<joints.size())return joints[node];return {};} /* Player 2 extension */
     if(!kind&&player_asset_){
         if(node<player_joint_matrices_.size())return player_joint_matrices_[node];
         if(player_joint_matrices_.empty()){

@@ -209,9 +209,12 @@ Player2Command RoomWorld::player2_ai(){
     auto& p=*player2_;auto& progress=*p.progress;const auto origin=p.work.transform.position;
     auto& bag=progress.equipment;
     if(!p.driven&&p.work.hp>1&&!bag.slots()[0])for(unsigned slot=2;slot<bag.capacity()+2;++slot){const auto id=Inventory::id(bag.slots()[slot]);if(id&&id<156&&(itemdata[id].type&1u)){bag.equip(slot);break;}}
-    if(!p.driven&&p.work.hp>1&&bag.slots()[0]&&bag.weapon()>=3&&!Inventory::quantity(bag.slots()[bag.slots()[0]]))bag.reload();
     NpcAiActor actor{p.work.transform,p.floor,p.combat->original_mode(),player_.position,{}};
-    actor.reach=bag.weapon()>=3?20.f:-1.f;actor.fire=bag.weapon()==2||(bag.weapon()>=3&&p.combat->locked_target());
+    // Firearm: rounds in the magazine, or spare rounds for the original reload (bhCPM2_act_rld runs from the
+    // attack press on an empty magazine, with its animation); neither = no engagement, no empty clicks.
+    const bool firearm=bag.weapon()>=3;const unsigned rounds=bag.slots()[0]<12?Inventory::quantity(bag.slots()[bag.slots()[0]]):0u;
+    actor.armed=bag.weapon()==2||(firearm&&(rounds>0||bag.reload_available()));
+    actor.reach=firearm?20.f:-1.f;actor.fire=bag.weapon()==2||(firearm&&p.combat->locked_target());
     NJS_POINT3 goal{};
     const bool ordered=p.door_order&&player2_door(*p.door_order,false).has_value();
     if(p.door_order&&!ordered)p.door_order.reset();
@@ -221,7 +224,31 @@ Player2Command RoomWorld::player2_ai(){
         const float dx=origin.x-goal.x,dz=origin.z-goal.z,length=std::hypot(dx,dz);
         if(length>4.5f){goal.x+=4.5f*dx/length;goal.z+=4.5f*dz/length;}}
     if(ordered)actor.goal=goal;
-    const auto result=npc_ai(actor);if(std::getenv("RECVX_AI_TRACE"))std::fprintf(stderr,"P2AI mode=%u fire=%d yaw=%d action=%s turn=%d aim=%d attack=%d next=%d\n",actor.combat_mode,int(actor.fire),int(actor.actor.yaw),result.action.c_str(),result.controls.turn,int(result.controls.aim),int(result.controls.attack),int(result.controls.next_target));progress.decision=result.action;return result.controls;
+    // Leader on another floor: walk to the nearest stair/ladder area of this floor (rom->etcp type 1/2) and start the
+    // original step action from its probe, like Player 1's bhCheckExmAtari branch; no invented traversal.
+    if(!ordered&&collision_events_&&floor_at(player_.position)!=p.floor){
+        float best=1e9f;p.stair_goal.reset();
+        for(unsigned i=0;i<collision_events_->interactions.size();++i){const auto& a=collision_events_->interactions[i];
+            if(!(a.flags&1u)||(a.type!=1&&a.type!=2)||a.floor!=p.floor)continue;
+            // Walk to the nearest reachable entry of the area: its four edge midpoints (one unit inside) or the centre,
+            // whichever the body capsule reaches without a wall (the slope's railing blocks the other sides).
+            const float cx=a.position.x+a.extent.x*.5f,cz=a.position.z+a.extent.z*.5f;
+            // Already standing in the area: the probe 0.75 units ahead stays inside, start from here.
+            if(origin.x>=a.position.x&&origin.x<=a.position.x+a.extent.x&&origin.z>=a.position.z&&origin.z<=a.position.z+a.extent.z){best=0.f;p.stair_goal=i;goal={cx,origin.y,cz};break;}
+            // Stair entries are narrow (railings): a one-unit probe; the body pass keeps the real 3.5-unit collision.
+            const auto clear=[&](NJS_POINT3 u,NJS_POINT3 v){return c2_wall_n({{u.x,u.y+8.f,u.z},{v.x,v.y+8.f,v.z},1.f},0)==0;};
+            // Edge midpoints: an outside point one unit before the edge must be reachable, the goal is one unit inside.
+            const NJS_POINT3 outside[4]={{a.position.x-1.f,origin.y,cz},{a.position.x+a.extent.x+1.f,origin.y,cz},{cx,origin.y,a.position.z-1.f},{cx,origin.y,a.position.z+a.extent.z+1.f}};
+            const NJS_POINT3 inside[4]={{a.position.x+1.f,origin.y,cz},{a.position.x+a.extent.x-1.f,origin.y,cz},{cx,origin.y,a.position.z+1.f},{cx,origin.y,a.position.z+a.extent.z-1.f}};
+            for(unsigned k=0;k<4;++k){const float d=std::hypot(inside[k].x-origin.x,inside[k].z-origin.z);const bool c1=clear(origin,outside[k]),c2=clear(outside[k],inside[k]);
+                if(std::getenv("RECVX_AI_TRACE"))std::fprintf(stderr,"P2STAIR etc=%u edge=%u d=%.1f clear=%d/%d\n",i,k,d,int(c1),int(c2)); /* Diagnose only */
+                if(d<best&&c1&&c2){best=d;p.stair_goal=i;goal=inside[k];}}}
+        if(p.stair_goal){actor.goal=goal;actor.goal_on_stairs=true;if(best<9.f&&player2_stairs_begin()){progress.decision="stairs";return {};}}
+    }else p.stair_goal.reset();
+    auto result=npc_ai(actor);if(p.stair_goal&&result.action=="approach-door")result.action="approach-stairs";
+    if(result.target!=~0u&&result.controls.aim){ // lying target (joint top under 6 units above its ground): the original low aim (pad down)
+        float top=-1e9f;unsigned n=0;for(unsigned node=0;node<64;++node)if(const auto q=enemy_joint_position(result.target,node)){top=std::max(top,q->y);++n;}
+        if(n){const auto tp=combat_targets();for(const auto& t:tp)if(t.index==result.target){const float ground=debug_ground({t.position.x,top+1.f,t.position.z});if(top-(ground>-999.f?ground:t.position.y)<6.f)result.controls.vertical=-1;break;}}}if(std::getenv("RECVX_AI_TRACE"))std::fprintf(stderr,"P2AI mode=%u fire=%d yaw=%d action=%s turn=%d aim=%d attack=%d next=%d\n",actor.combat_mode,int(actor.fire),int(actor.actor.yaw),result.action.c_str(),result.controls.turn,int(result.controls.aim),int(result.controls.attack),int(result.controls.next_target));progress.decision=result.action;return result.controls;
 }
 
 NpcAiDecision RoomWorld::npc_ai(const NpcAiActor& actor)const{
@@ -234,7 +261,7 @@ NpcAiDecision RoomWorld::npc_ai(const NpcAiActor& actor)const{
     float nearest=48.f;
     const bool trace=std::getenv("RECVX_AI_TRACE")!=nullptr; /* Diagnose only: candidate rejection reasons on stderr. */
     const auto reject=[&](unsigned index,const char* why){if(trace)std::fprintf(stderr,"NPCAI target %u rejected: %s\n",index,why);};
-    if(!ordered&&leader_distance<=48.f)for(const auto& target:combat_targets()){
+    if(!ordered&&leader_distance<=48.f&&actor.armed)for(const auto& target:combat_targets()){
         if(target.hp<=0||recvx_enemy_is_subplayer_id(target.identity)){reject(target.index,"hp/subplayer");continue;}
         if(floor_at(target.position)!=actor.floor){reject(target.index,"floor");continue;}
         // Aim candidates can still be in their invulnerable entry/death pass.
@@ -248,7 +275,7 @@ NpcAiDecision RoomWorld::npc_ai(const NpcAiActor& actor)const{
         nearest=distance;goal=target.position;stop=actor.reach>=0.f?actor.reach:target.radius+3.f;hostile=true;selected=target.index;
     }
     if(!ordered&&!hostile&&leader_distance<=stop)return {};
-    if(floor_at(goal)!=actor.floor)return {{},"blocked-floor",selected};
+    if(!actor.goal_on_stairs&&floor_at(goal)!=actor.floor)return {{},"blocked-floor",selected};
     const float distance=std::hypot(goal.x-origin.x,goal.z-origin.z);
     if(hostile&&distance<=stop){
         const int angle=recvx_subplayer_dir_target(origin.x,origin.z,actor.actor.yaw,goal.x,goal.z,32767);
@@ -259,7 +286,8 @@ NpcAiDecision RoomWorld::npc_ai(const NpcAiActor& actor)const{
         const bool locked=actor.reach>=0.f&&(actor.fire||actor.combat_mode==69u);
         return {{0,locked?0:std::abs(angle)>655?(angle>0?-1:1):0,false,true,actor.fire&&(locked||std::abs(angle)<=2048)&&actor.combat_mode==65u,actor.reach>=0.f&&!actor.fire&&actor.combat_mode==65u},actor.fire?"attack":"aim",selected};
     }
-    const auto clear=[&](NJS_POINT3 a,NJS_POINT3 b){return c2_wall_n({{a.x,a.y+8.f,a.z},{b.x,b.y+8.f,b.z},3.5f},0)==0;};
+    const float probe=actor.goal_on_stairs?1.f:3.5f; // stair entries are narrow; the body pass keeps the real collision
+    const auto clear=[&](NJS_POINT3 a,NJS_POINT3 b){return c2_wall_n({{a.x,a.y+8.f,a.z},{b.x,b.y+8.f,b.z},probe},0)==0;};
     if(!clear(origin,goal)){
         // rutchk.c:5/47: original room routing data, same indexing as EN01.
         const auto zone=[&](NJS_POINT3 point)->int{for(unsigned i=0;i<route_areas_.size();++i){const auto& a=route_areas_[i];if(point.x>=a.position.x&&point.x<=a.position.x+a.extent.x&&point.y>=a.position.y&&point.y<=a.position.y+a.extent.y&&point.z>=a.position.z&&point.z<=a.position.z+a.extent.z)return int(i);}return -1;};
@@ -405,7 +433,7 @@ int RoomWorld::player2_set_motion_now(int add,const MotionClip*& clip){
 // player.c:6214 bhCPM0_damage for the secondary actor: mode1 0/1 = hit from the front/back, mode2 = strength,
 // motion mode2*2+71+mode1 with bhGetTransZ(mode2*2+11+mode1) and bhAddSpeed(plp,0), flg 0x400000 ends it.
 // The character voice (CallPlayerVoice 1024/1026/1027) and the sys->gm_flg 0x40 bookkeeping of the primary
-// player are not applied to the companion (host rule); everything else follows the original switch.
+// player's gm_flg bookkeeping is not applied to the companion (host rule); the voice plays on the companion's bank.
 void RoomWorld::player2_damage_tick(){
     auto& p=*player2_;auto& w=p.work;auto& a=p.action;if(!(simulation_flags_&1u))return;
     const unsigned mode1=(p.collision_mode>>8)&0xffu,mode2=(p.collision_mode>>16)&0xffu,mode3=p.collision_mode>>24;
@@ -418,6 +446,7 @@ void RoomWorld::player2_damage_tick(){
         if(!p.asset->has_motion(motion)){player2_gaps_.insert("bhCPM0_damage (plp 2): player motion missing");p.collision_mode=1;return;}
         w.motion=motion;w.frame=0;a.mtn_no=motion;a.frm_no=0;a.hokan_rate=49152;a.hokan_count=4;p.mtn_add=65536;p.mtn_md=0;
         a.arp=mode1?1.f+float(mode2):-(1.f+float(mode2));
+        audio_.play_companion_voice(mode1?1024:(mode2<2?1026:1027)); /* CallPlayerVoice of bhCPM0_damage on the companion's bank */
         p.collision_mode=(p.collision_mode&0x00ffffffu)|(1u<<24);
     }else if(mode3==1){
         if(w.object_flags&0x400000u){
@@ -437,6 +466,95 @@ void RoomWorld::player2_damage_tick(){
     const MotionClip* clip=nullptr;if(player2_set_motion_now(int(p.mtn_add),clip)==-2)return;
     const unsigned total=clip->frames;
     if(total>0){if(unsigned(w.frame/65536)>=total-1u)w.object_flags|=0x400000u;else w.object_flags&=~0x400000u;}
+}
+// hitchk.c bhCheckExmAtari, stair branch, on the secondary actor: the same probe table as the runtime's begin_stairs
+// (type 1 at 0.75, type 2 at 4.5 with the six-unit indent, danf 3.0+ar) over rom->etcp and bhObj001's mobile areas.
+// bhSetUseKaidanFlag marks are not written for the companion (host rule: the room table mark belongs to plp).
+bool RoomWorld::player2_stairs_begin(){
+    if(!player2_||player2_->stairs.active||!collision_events_)return false;
+    auto& p=*player2_;auto& w=p.work;const auto& pos=w.transform.position;const int floor=p.floor;
+    const float radius=3.5f,height=p.character?17.5f:16.5f;
+    auto areas=collision_events_->interactions;
+    for(const auto& a:push_steps())areas.push_back({a.flg,a.type,a.attr,int(a.flr_no),{a.px,a.py,a.pz},{a.w,a.h,a.d},{a.prm0,a.prm1,a.prm2,a.prm3}});
+    float sine,cosine;njSinCos(w.transform.yaw,&sine,&cosine);
+    int action=0,action_floor=floor,matched=-1,danf=0;bool ended=false;
+    for(std::size_t i=0;i<areas.size();++i){const auto& a=areas[i];
+        if(!(a.flags&1)||(a.type!=1&&a.type!=2))continue;
+        const float reach=a.type==1?0.75f:4.5f;
+        const float px=pos.x-reach*sine,pz=pos.z-reach*cosine;
+        const bool inside=a.position.x<=px&&a.position.x+a.extent.x>=px&&a.position.z<=pz&&a.position.z+a.extent.z>=pz;
+        if(std::getenv("RECVX_AI_TRACE"))std::fprintf(stderr,"P2BEGIN etc=%zu type=%u afloor=%d floor=%d inside=%d probe=%.1f,%.1f yaw=%d status=%x\n",i,a.type,a.floor,floor,int(inside),px,pz,int(w.transform.yaw),p.status); /* Diagnose only */
+        if(a.floor!=floor||!inside)continue;
+        if(a.type==1){
+            if((p.status&0x10u)||(a.attribute&0x400000u)){ended=true;break;}
+            if(a.parameters[0]==0)action=(a.attribute&1)?20:14;
+            else{action=(a.attribute&1)?21:15;action_floor=floor_at({0.0f,pos.y-2.0f*float(a.parameters[2]),0.0f});}
+            matched=int(i);ended=true;break;
+        }
+        if((p.status&0x20u)||a.parameters[0]!=0){if(!(p.status&0x20u)&&a.parameters[0]!=0)danf=1;continue;}
+        const int facing=(w.transform.yaw+8192)&~0x3fff;
+        const float ix=pos.x-6.0f*njSin(facing),iz=pos.z-6.0f*njCos(facing);
+        if(1.0f+a.position.x<=ix&&(a.position.x+a.extent.x)-1.0f>=ix&&1.0f+a.position.z<=iz&&(a.position.z+a.extent.z)-1.0f>=iz){
+            const float wx=pos.x-(2.0f+radius)*njSin(facing),wz=pos.z-(2.0f+radius)*njCos(facing);
+            const auto hit=collision_contact({wx,9.1f+pos.y,wz},w.object_flags,radius,height);
+            if(!hit||(hit->attributes&4u)){action=16;matched=int(i);ended=true;break;}
+        }
+        ended=true;break;
+    }
+    if(!ended&&!(p.status&0x20u)&&(p.status&0x20000u)&&danf==0){
+        const int facing=(w.transform.yaw+8192)&~0x3fff;
+        const float wx=pos.x-(3.0f+radius)*njSin(facing),wz=pos.z-(3.0f+radius)*njCos(facing);
+        const auto hit=collision_contact({wx,pos.y-8.9f,wz},w.object_flags,radius,height);
+        if(!hit||(hit->attributes&4u)){action=17;action_floor=floor;ended=true;}
+    }
+    if(action==0)return false;
+    RECVX_STAIR_AREA area{};
+    if(matched>=0){const auto& a=areas[std::size_t(matched)];
+        area.flg=std::uint8_t(a.flags);area.type=std::uint8_t(a.type);area.id=0;area.flr_no=std::int8_t(a.floor);
+        area.attr=a.attribute;area.px=a.position.x;area.py=a.position.y;area.pz=a.position.z;
+        area.w=a.extent.x;area.h=a.extent.y;area.d=a.extent.z;
+        area.prm0=std::uint8_t(a.parameters[0]);area.prm1=std::uint8_t(a.parameters[1]);area.prm2=std::uint8_t(a.parameters[2]);area.prm3=std::uint8_t(a.parameters[3]);}
+    p.stairs.status=p.status;p.stairs.flg=w.object_flags;p.stairs.st_flg=p.system;
+    recvx_stairs_begin(&p.stairs,&area,action,floor_heights().data(),pos.x,pos.y,pos.z,w.transform.yaw,action_floor,p.action.dmlvl,p.action.wpntp);
+    p.status=p.stairs.status;w.object_flags=p.stairs.flg;p.system=p.stairs.st_flg;
+    p.stair_goal.reset();return true;
+}
+// The original step action per tick (player_stairs.c recvx_stairs_tick) with host services on the secondary actor's
+// asset, committed joints and tree; the runtime's Player-1 host is the reference, the head work and the room table
+// mark are not bound for the companion.
+void RoomWorld::player2_stairs_tick(){
+    auto& p=*player2_;auto& w=p.work;auto& a=p.action;if(!(simulation_flags_&1u))return;
+    p.stairs.rtspd=p.stairs.dmlvl==2?0.8f:1.0f;
+    struct Host{RoomWorld* world;Player2* player;std::vector<BoneMatrix> nodes;NJS_POINT3 at;};
+    Host h{this,&p,p.asset->script_nodes(w.own_models.at(0).owp_mtx),w.transform.position};
+    RECVX_STAIR_HOST host{&h,
+        [](void* u,unsigned m,int f,float out[3])->int{auto& b=*static_cast<Host*>(u)->player->asset;if(!b.has_motion(m))return 0;const auto& c=b.motion_clip(m);if(c.positions.empty()||c.positions[0].empty())return 0;const std::size_t key=std::size_t(std::min<int>(std::max(f/65536,0),int(c.positions[0].size())-1));const auto& k=c.positions[0][key];out[0]=k.x;out[1]=k.y;out[2]=k.z;return 1;},
+        [](void* u,unsigned m)->unsigned{auto& b=*static_cast<Host*>(u)->player->asset;return b.has_motion(m)?b.motion_frames(m):0;},
+        [](void* u,unsigned n,float out[3]){const auto& h=*static_cast<Host*>(u);if(n<h.nodes.size()){out[0]=h.nodes[n].value[12];out[1]=h.nodes[n].value[13];out[2]=h.nodes[n].value[14];}else{out[0]=h.at.x;out[1]=h.at.y;out[2]=h.at.z;}},
+        [](void* u,unsigned m,int f,int md,int* hc,int rate){auto& h=*static_cast<Host*>(u);if(h.player->asset->has_motion(m)){h.world->player2_motion(m,f,unsigned(md),unsigned(*hc),rate);if(*hc)--*hc;}},
+        [](void* u,unsigned node,float pos[3],int ang[3])->int{const auto& h=*static_cast<Host*>(u);const auto& obj=h.player->work.own_models.at(0).obj;if(node>=h.player->asset->script_count())return 0;const auto physical=h.player->asset->model_index(node);if(physical>=obj.size())return 0;const auto& o=obj[physical];pos[0]=o.position.x;pos[1]=o.position.y;pos[2]=o.position.z;ang[0]=o.angles[0];ang[1]=o.angles[1];ang[2]=o.angles[2];return 1;},
+        [](void* u,int floor,float x,float z,int special)->int{const auto& h=*static_cast<Host*>(u);return int(h.world->floor_sound(floor,x,z,special!=0));},
+        [](void* u,int sound,int type,int flag){auto& h=*static_cast<Host*>(u);if(flag==0)return;int list;unsigned slot;
+            if(type>=2){list=type==2?5:int(std::int8_t(std::uint8_t(unsigned(sound)&0xffu)));slot=6u;}else{h.player->foot_switch=!h.player->foot_switch;list=sound;slot=h.player->foot_switch?12u:11u;}
+            if(list==-1)return;if(list<0||!h.world->audio_.play_room_sound(2u,unsigned(list),AudioMixer::se_voice(slot)))h.player->stairs.unsupported_services|=type>=2?RECVX_STAIR_UNBOUND_ACTION_SE:RECVX_STAIR_UNBOUND_FOOTSTEP;},
+        [](void* u,const float position[3],float* top)->int{const auto& h=*static_cast<Host*>(u);return h.world->water_top({position[0],position[1],position[2]},*top)?1:0;},
+        [](void* u,const RECVX_STAIR_EFFECT* e){auto& h=*static_cast<Host*>(u);EffectSpawn spawn;spawn.flg=e->flg;spawn.id=e->id;spawn.type=e->type;spawn.flr_no=e->flr_no;spawn.mdlver=e->mdlver;spawn.position={e->px,e->py,e->pz};spawn.scale={e->sx,e->sy,e->sz};spawn.ax=e->ax;spawn.ay=e->ay;spawn.lkono=e->lkono;if(e->has_offset){spawn.has_offset=true;spawn.offset={e->offset[0],e->offset[1],e->offset[2]};}if(h.world->spawn_effect(spawn,1,1)<0)h.player->stairs.unsupported_services|=RECVX_STAIR_UNBOUND_EFFECT;},
+        [](void*,int,int){},
+        [](void*,int){},
+        [](void*){},
+        [](void* u,float py)->int{const auto& h=*static_cast<Host*>(u);return h.world->floor_at({0.0f,py,0.0f});},
+        floor_heights().data(),int(p.character)};
+    p.stairs.status=p.status;p.stairs.flg=w.object_flags;p.stairs.st_flg=p.system;
+    const bool running=recvx_stairs_tick(&p.stairs,&host)!=0;
+    if(std::getenv("RECVX_AI_TRACE"))std::fprintf(stderr,"P2STAIRS running=%d mode2=%d mode3=%d motion=%u frame=%d floor=%d pos=%.1f,%.1f,%.1f unbound=%x\n",int(running),p.stairs.mode2,p.stairs.mode3,p.stairs.motion,p.stairs.frame/65536,p.stairs.floor,p.stairs.px,p.stairs.py,p.stairs.pz,p.stairs.unsupported_services); /* Diagnose only */
+    p.floor=p.stairs.floor;p.status=p.stairs.status;w.object_flags=p.stairs.flg;p.system=p.stairs.st_flg;
+    w.transform.position={p.stairs.px,p.stairs.py,p.stairs.pz};w.transform.yaw=p.stairs.ay;
+    if(p.asset->has_motion(p.stairs.motion)){w.motion=p.stairs.motion;w.frame=p.stairs.sample_frame;}
+    a.hokan_count=std::uint32_t(p.stairs.hokan_count);a.hokan_rate=p.stairs.hokan_rate;
+    p.safe=w.transform.position;player2_model();
+    if(!running){p.previous_probe={w.transform.position.x,w.transform.position.y+12.5f,w.transform.position.z};p.system&=~4u;p.collision_mode=1;
+        recvx_player_action_reset(&a,w.transform.position.x,w.transform.position.z,w.transform.yaw,0,0,w.motion);a.frm_no=int(w.frame);
+        if(p.stairs.unsupported_services)player2_gaps_.insert("Player 2 stairs: unbound services "+std::to_string(p.stairs.unsupported_services));}
 }
 void RoomWorld::player2_driven_tick(){
     // player.c:1502 bhSetMotion(plp) inside bhControlPlayer while an enemy owns the actor, like control_enemy_player_motion.
@@ -503,6 +621,7 @@ void RoomWorld::tick_player2(Player2Command local,bool free_control){
         const unsigned pad=(command.move>0?1u:command.move<0?2u:0u)|(command.turn<0?4u:command.turn>0?8u:0u)|(command.aim?0x100u:0u)|(command.attack?0x10u:0u);
         const unsigned ps=pad&~p.pad_full;p.lever=((ps&0xfu)?0xfu:0u)|((ps&0x110u)?0x100u:0u);p.pad_full=pad;}
     if(p.driven){player2_driven_tick();return;}
+    if(p.stairs.active){player2_stairs_tick();return;} /* bhCPM1_act_kdu/kdd/dnu/dnd/hsu/hsd on the secondary actor */
     if((p.collision_mode&0xffu)==2u){player2_damage_tick();return;} /* bhCtrPly_mode0[2] = bhCPM0_damage on the secondary actor */
     if(p.collapse_pending){player2_incapacitate();return;}
     auto& equipment=p.progress->equipment;
@@ -521,7 +640,7 @@ void RoomWorld::tick_player2(Player2Command local,bool free_control){
     std::size_t combat_motion=w.motion;std::int64_t combat_frame=w.frame;
     const auto combat_origin=w.transform.position;
     const unsigned old_attacks=p.combat->attacks,old_hits=p.combat->hits;
-    const bool fighting=p.combat->tick({command.aim,command.attack,command.turn,command.move,command.next_target},false,equipment,*p.asset,w.transform,combat_motion,combat_frame,this,audio_,collision_events_,&binding);
+    const bool fighting=p.combat->tick({command.aim,command.attack,command.turn,command.vertical,command.next_target},false,equipment,*p.asset,w.transform,combat_motion,combat_frame,this,audio_,collision_events_,&binding);
     p.progress->attacks+=p.combat->attacks-old_attacks;p.progress->hits+=p.combat->hits-old_hits;
     for(const auto& gap:p.combat->unbound_routines())player2_gaps_.insert(gap);
     w.motion=unsigned(combat_motion);w.frame=combat_frame;
@@ -544,8 +663,10 @@ void RoomWorld::tick_player2(Player2Command local,bool free_control){
     io.gap=[](void* u,const char* name){static_cast<Host*>(u)->world->player2_gaps_.insert(name);};
     // Character-specific sound banks, water effects and head tracking are open
     // bindings. The action port reports any reached service through gap.
-    recvx_player_action_pad(&a,&io,nullptr);
+    if(std::getenv("RECVX_AI_TRACE"))std::fprintf(stderr,"P2ACT before pad=%x mode2=%u mode3=%u mtn=%u frm=%d wmotion=%u wframe=%lld add=%d status=%x flg=%x\n",pad,a.mode2,a.mode3,a.mtn_no,a.frm_no,w.motion,(long long)w.frame,a.mtn_add,p.status,w.object_flags); /* Diagnose only */
+    if(!(w.object_flags&0x10000u))recvx_player_action_pad(&a,&io,nullptr); /* player.c:1804: bhControlPlayerPad only without plp->flg 0x10000 (run start, damage, idle fidget keep their mode) */
     if(!recvx_player_action_bas(&a,&io)){player2_gaps_.insert("Player 2 special action not bound");return;}
+    if(std::getenv("RECVX_AI_TRACE"))std::fprintf(stderr,"P2ACT after mode2=%u mode3=%u mtn=%u frm=%d add=%d\n",a.mode2,a.mode3,a.mtn_no,a.frm_no,a.mtn_add);
     recvx_player_action_turn(&a,&io);p.pad_old=io.pad_on;
     p.safe.x=a.spx;p.safe.z=a.spz;
     const auto previous=w.transform.position;

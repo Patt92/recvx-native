@@ -8,7 +8,7 @@ namespace recvx {
 // User-requested host extension, disabled by default. These commands feed the
 // existing native player action port; a driver supplies intent, never a pose.
 enum class Player2Mode {Off,Local,Npc};
-struct Player2Command {int move=0,turn=0;bool run=false,aim=false,attack=false,next_target=false;};
+struct Player2Command {int move=0,turn=0;bool run=false,aim=false,attack=false,next_target=false;int vertical=0;};
 // Shared host intent only. Each caller keeps its own native actor/combat owner.
 struct NpcAiActor {
     SceneSpawn actor;
@@ -21,6 +21,8 @@ struct NpcAiActor {
     // for firearms, the original lock table of the caller's combat work).
     float reach=-1.f;
     bool fire=true;
+    bool armed=true; // false: no usable weapon (empty firearm without spare rounds), follow only
+    bool goal_on_stairs=false; // the goal lies on a stair area whose floor number differs from the actor's
 };
 struct NpcAiDecision {
     Player2Command controls;
