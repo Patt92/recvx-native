@@ -50,8 +50,14 @@ downed NPC assistance through trade/medicine is enabled (`build/validation/npc-h
 NPC/Player AI now retain a valid native target after the lock turn, hold the
 trigger for automatic fire, attack/search in high/low aim and include living
 zero-HP enemies. Steve SMG/dog damage and zombie grab checks:
-`build/validation/npc-combat/`. Unexpected invulnerability above 1 HP remains
-unreproduced; the development binary contains the fixes, Start.command app unchanged.
+`build/validation/npc-combat/`. The later NPC targeting report is reproduced:
+`begin_enemy_pass` incorrectly excluded all nonzero enemy types. The working-tree
+fix lets original variant state machines choose attacks; real RM_0060/type-11
+and RM_3070/crawler runs now grab/damage Steve without damaging P1. Sleeping
+type-8 wake-up remains original. Evidence: `build/validation/npc-targets/`.
+Development binary only; Start.command app unchanged. Special enemy/effect
+services still bound directly to P1 are separate open companion bindings;
+this is not an acceptance of all enemy families.
 Save files/snapshots format 3 carry an optional two-player block (older files =
 single player); netplay reports the drifting part, drops a silent peer after 30 s and
 rejoins with the host's save image ([docs/NETPLAY.md](docs/NETPLAY.md#rejoin-after-a-drop)).

@@ -400,7 +400,13 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         if(args.mods.empty())args.mods=args.data.parent_path()/"mods";
 #endif
         if(args.verify_players)return verify_players(args.data);
-        if(!args.preview&&!args.verify&&(!fs::is_regular_file(args.data/"native-data.version")||!fs::is_directory(args.data/"rooms")))throw std::runtime_error("exported native data missing: run recvx-assets on the extracted disc, or use --preview for archive inspection");
+        if(!args.preview&&!args.verify&&(!fs::is_regular_file(args.data/"native-data.version")||!fs::is_directory(args.data/"rooms")))throw std::runtime_error("exported native data missing in "+args.data.u8string()+
+#if defined(RECVX_ANDROID)
+            ": prepare data/ on a computer (README, Quick start step 2), then copy it with adb push to this folder (README, Android)"
+#else
+            ": run recvx-assets on the extracted disc, or use --preview for archive inspection"
+#endif
+            );
         recvx::RoomArchive rooms(args.data);
         if(args.verify){
             std::size_t passed=0,triangles=0,targets=0;
@@ -2824,7 +2830,12 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         if(image.gpu()){const auto& g=image.gpu()->timings();const double frames=std::max(1.0,double(rendered_frames));
          std::cout<<"GPU: build "<<1000.0*g.build/frames<<", upload "<<1000.0*g.upload/frames<<" ("<<g.uploads<<" textures), encode "<<1000.0*g.encode/frames
                   <<", wait "<<1000.0*g.wait/frames<<" ("<<(g.submits/frames)<<" submits, davon GPU "<<1000.0*g.gpu/frames<<"), readback "<<1000.0*g.readback/frames<<" ms/frame\n";}if(presenter){const auto& p=presenter->stats();std::cout<<"Presentation stage: "<<presenter->describe()<<"; "<<p.presents<<" presents ("<<p.repeated<<" repeated), "<<p.interpolated<<" interpolated, "<<p.resets<<" history resets, "<<p.skipped<<" skipped, GPU "<<(p.presents?1000.0*p.gpu_seconds/p.presents:0)<<" ms/frame\n";presenter.reset(); /* Thread vor dem Fenster beenden */}if(audio_device)SDL_CloseAudioDevice(audio_device);report();return 0;
-    }catch(const std::exception& e){std::cerr<<"Native runtime error: "<<e.what()<<'\n';return 1;}
+    }catch(const std::exception& e){std::cerr<<"Native runtime error: "<<e.what()<<'\n';
+#if defined(RECVX_ANDROID)
+        // Android hat kein Terminal: ohne Dialog schliesst die App wortlos, der Grund steht nur im logcat.
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"RECVX Native",e.what(),nullptr);
+#endif
+        return 1;}
 }
 #if defined(RECVX_ANDROID)
 // SDLActivity (android/) laedt libmain.so und ruft SDL_main im SDL-Thread (SDLActivity.getMainFunction).

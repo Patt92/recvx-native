@@ -89,6 +89,23 @@ def main():
                        extra=(*bite_options, '--player2-model', '12'), room='RM_0031.RDX')
     assert steve_bitten['player2']['grabs'] >= 2 and 1 < steve_bitten['player2']['hp'] < 160, steve_bitten['player2']
     assert steve_bitten['player2']['life'] == 0, 'Steve became inactive above the NPC incapacity floor'
+    # Nonzero enemy type is a variant, not a scripted/dormant flag. These
+    # original room entries previously never selected the companion at all.
+    # No enemy-state writes or diagnostic placement: Steve starts beside P1.
+    for name, room, variant in (('steve-type11', 'RM_0060.RDX', 11),
+                                ('steve-crawler', 'RM_3070.RDX', 6)):
+        attacked = run(name, 'npc', frames=900,
+                       extra=(*bite_options, '--player2-model', '12'), room=room)
+        assert any(e['identity'] == 1 and e['type'] == variant for e in attacked['enemies']), (name, 'variant absent')
+        assert attacked['player2']['grabs'] > 0 and 1 < attacked['player2']['hp'] < 160, (name, attacked['player2'])
+        assert attacked['hp'] == 160, (name, 'companion attack damaged Player 1')
+    # A sleeping type-8 zombie still owns its original wake condition. Target
+    # selection alone must not wake it. Local P2 stands near it without input.
+    sleeping = run('dormant-variant', 'local', '0 player2_position -3 0 24 0\n', frames=500,
+                   extra=bite_options, room='RM_0080.RDX')
+    sleepers = [e for e in sleeping['enemies'] if e['identity'] == 1 and e['type'] == 8]
+    assert len(sleepers) == 3 and all(e['work']['mode'][0] == 1 for e in sleepers)
+    assert sleeping['player2']['hp'] == 160 and sleeping['player2']['grabs'] == 0
     # Real grant/exchange path: the two-cell SMG sorts before the manual, so
     # confirm exchanges the first cell with the partner's knife.
     smg_setup = ('0 debug_key F2\n1 debug_select give_count 300\n2 confirm\n'
@@ -103,7 +120,9 @@ def main():
     dogs = run('steve-smg-dogs', 'npc', smg_setup + '15 player2_position 120 0 80 0\n',
                frames=1200, extra=(*fight_options, '--player2-model', '12'), room='RM_1000.RDX')
     assert dogs['player2']['hits'] > 0 and sum(e['hp'] < 0 for e in dogs['enemies'] if e['identity'] == 4) >= 2, dogs['player2']
-    dogs_live = run('steve-smg-dogs-active', 'npc', smg_setup + '15 player2_position 120 0 80 0\n',
+    # Both waiting and active dog variants now see the nearer actor. At this
+    # diagnostic placement Steve survives a grab before killing both dogs.
+    dogs_live = run('steve-smg-dogs-active', 'npc', smg_setup + '15 player2_position 110 0 80 0\n',
                     frames=1200, extra=(*bite_options, '--player2-model', '12'), room='RM_1000.RDX')
     assert sum(e['hp'] < 0 for e in dogs_live['enemies'] if e['identity'] == 4) >= 2
     assert 1 < dogs_live['player2']['hp'] < 160 and dogs_live['player2']['grabs'] >= 1, dogs_live['player2']
@@ -153,7 +172,7 @@ def main():
     (out / 'view.bmp').unlink(missing_ok=True)
     run('view', 'local', '0 player2_keys right\n20 player2_keys forward\n40 player2_keys none\n',
         frames=40, extra=('--screenshot', str(out / 'view.bmp')))
-    print('Player 2 runtime: follow, native knife/SMG damage, Steve NPC bite/release and RM_1000 dog kills with attacks enabled, 1-HP crouch, mortal local player, menu hold, Player AI fight/yield, stairs and two-player saves PASS')
+    print('Player 2 runtime: follow, native knife/SMG damage, Steve NPC bite/release, nonzero zombie variants, sleeping variant unchanged, RM_1000 dog kills with attacks enabled, 1-HP crouch, mortal local player, menu hold, Player AI fight/yield, stairs and two-player saves PASS')
 
 
 if __name__ == '__main__':

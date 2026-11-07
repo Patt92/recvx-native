@@ -353,9 +353,14 @@ void RoomWorld::begin_enemy_pass(RECVX_ENEMY_WORK* w){
     // A work that drives a player (grab/throw/death, plp mode0 4/5/6) keeps that player until it releases it.
     if(p.driven&&p.driver==w){enemy_target_=1u;enemy_targets_[w]=1u;return;}
     if(enemy_player_driving_&&player_driver_==w){enemy_targets_[w]=0u;return;}
-    // Dormant/scripted works (type != 0: EN01 type 8 sleepers, EN04 type 1 waiting for its trigger area, script
-    // types) keep the primary view, so the original wake-up triggers still answer to Player 1.
-    if(w->type!=0u){enemy_targets_[w]=0u;return;}
+    // type is an enemy-specific variant, not a common active/scripted flag:
+    // en01.c InitType06/11 retain nonzero types during ordinary attacks.
+    // Let each original state machine decide whether it can attack. Story
+    // subplayers keep the primary view; they are not combat opponents.
+    if(w->id<RECVX_ENEMY_IDS&&(enemy_dispatch_.jump[w->id]==recvx_subplayer_enemy||
+                             enemy_dispatch_.jump[w->id]==recvx_subplayer_enemy28)){
+        enemy_targets_[w]=0u;return;
+    }
     // Host rule: the nearer living, visible player on the ground plane; Player 1 hidden/scripted/dead leaves Player 2.
     const bool p1=!(player_hidden||event_camera||(player_scripted&&!grab_driving_))&&(!player_hp_owner_||*player_hp_owner_>=0);
     const auto& a=player_.position;const auto& b=p.work.transform.position;

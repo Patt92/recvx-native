@@ -188,7 +188,9 @@ SDK; Java through `JAVA_HOME` or Homebrew `openjdk@21`/`openjdk@17`.
 - User data (INIs, snapshots, saves, `runtime-warnings.log`) lives in the
   internal app storage `files/RECVX` (`native/user_paths.cpp`, reported by the
   runtime from `SDL_AndroidGetInternalStoragePath`); removed on uninstall.
-- stdout/stderr of the runtime go to logcat with tag `RECVX`.
+- stdout/stderr of the runtime go to logcat with tag `RECVX`. A start error (for example `data/` missing or unreadable) is also shown as an
+  SDL message box with the folder and the remedy before the app closes;
+  without it the app ended silently (2026-11-07).
 - Presentation: `native/gles_present.cpp` (2026-11-02; also Linux on desktop
   OpenGL 3.3 core, same shaders with another version line, all GL entry points
   through `SDL_GL_GetProcAddress`), a synchronous OpenGL ES

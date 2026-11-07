@@ -148,8 +148,10 @@ over its ground gets the original low aim (pad down).
 
 `build/validation/npc-combat/` records diagnostic macOS arm64 runtime checks:
 Steve's SMG produces multiple hits per attack, active RM_1000 dogs take native
-damage and die, and RM_0031 zombies grab/bite Steve above 1 HP. The reported
-unexpected invulnerability above 1 HP has not been reproduced; the intended
+damage and die, and RM_0031 zombies grab/bite Steve above 1 HP.
+`build/validation/npc-targets/` additionally reproduces and fixes the target
+exclusion of nonzero enemy variants: RM_0060 type-11 zombies and the RM_3070
+crawler now grab and damage Steve while Player 1 retains its HP. The intended
 held crouch at 1 HP remains separate from the active actor's damage handling.
 
 **The NPC never picks up items.** No companion command can invoke interaction,
@@ -191,9 +193,12 @@ enemy-driven death (`mode0` 6 with `flg` 0x2) is dead. The damage reaction
 `bhCPM0_damage` (`mode0` 2: hit from the front/back, motion 71+/72+, the
 translation curve and flg 0x400000) runs on the secondary actor too, without
 the primary's voice call and `gm_flg` bookkeeping. EN04 (dog) collision parts
-and the EN09 PlayerLink operate on the targeted actor's tree. Dormant or
-scripted works (`type` != 0) keep the primary view, so original wake-up
-triggers still answer to Player 1. Player 2 keeps no `nlxb` trace (its root
+and the EN09 PlayerLink operate on the targeted actor's tree. Enemy `type` is
+not a common activity flag: nonzero variants participate in target selection;
+their original state machines still own sleeping, wake-up and scripted states
+(en01.c InitType06/11, DmgCheck, Brain). Only the actual subplayer dispatch
+keeps the primary view; IDs repurposed by enemy child dispatch remain enemies.
+Player 2 keeps no `nlxb` trace (its root
 stands in). The companion pass keeps
 running while Player 1 is enemy-driven (grab/throw/death), so a grabbed Player
 2 or a fighting NPC is not frozen by Player 1's grab. The central `damage_player2` rule remains
