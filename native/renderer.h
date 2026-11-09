@@ -41,6 +41,7 @@ public:
     // Passive evidence of the last geometry pass, not another camera owner.
     // Passive evidence of the last geometry pass, not another camera owner.
     const std::array<float,2>& last_clip()const{return last_clip_;}
+    const std::array<float,2>& last_clip_volume()const{return last_clip_volume_;}
     // Diagnose der Bildaufbereitung (Summen seit Start), Sekunden: Setup/Clipping, Schattenmasken,
     // GPU-Raster, Bandstufe, Linien.
     struct Timings {double setup=0,shadow=0,gpu=0,bands=0,lines=0;unsigned frames=0;};
@@ -90,6 +91,7 @@ private:
     std::shared_ptr<GpuRaster> gpu_;
     bool last_gpu_frame_=false;std::string gpu_error_;
     Timings timings_;
+    std::array<float,2> last_clip_volume_{{320.f,240.f}};
     std::array<float,2> last_clip_{{0.05f,0.f}};
     // Bildschirmmassstab der Ninja-Projektion fuer die Clipregel der Chunk-Streifen:
     // fSx = AspectW*x*dist/z, fSy = AspectH*y*dist/z in 640x480-Einheiten (ps2_NinjaCnk.c:1195).

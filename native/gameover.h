@@ -20,7 +20,7 @@ public:
     Result tick(unsigned pressed,EventVm& events,AudioMixer& audio);
     // bhDrawGameOver und in derselben Bildfolge bhDrawScreenFade des Spieltasks (game.c:109-112)
     // auf dem gemeinsamen Fade: Netz, dann Fade, dann die Aufforderung von md1 2.
-    void draw(SoftwareRenderer& image,const GameUi& ui)const;
+    void draw(SoftwareRenderer& image,const GameUi& ui,ClipVolume volume={})const;
     bool active()const;
     // Host: ein Snapshot-Laden ersetzt den Spielstand wie bhPopGameData und beendet Task 14 ohne Rueckgabe.
     void abort();

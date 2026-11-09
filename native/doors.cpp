@@ -134,12 +134,14 @@ void DoorSequence::light_scene(Scene& scene)const{
         t.gouraud=true;t.world_lit=true;
     }
 }
-void DoorSequence::draw(SoftwareRenderer& renderer){
+void DoorSequence::draw(SoftwareRenderer& renderer,ClipVolume volume){
     // Every frame clears with the installed njSetBackColor: 0 from bhSetDoor, the fade colour in mode 10 (system.c:1033).
     Scene scene;scene.background=installed_back_pixel();SceneCamera camera;camera.position=core_.vew_pos;for(unsigned i=0;i<3;++i)camera.angles[i]=-core_.vew_ang[i];camera.perspective=12743;
     // bhSetDoor njClipZ. njSetAspect(1.174, 1) equals BHD_ASPECT_X/Y, which the
     // renderer already uses, so only the clip range differs from gameplay.
     camera.clip_near=clip_near_;camera.clip_far=clip_far_;
+    // door.c:240/355 schreibt nur njClipZ; das zuletzt installierte ClipVolume bleibt erhalten.
+    camera.clip_volume_x=volume.x;camera.clip_volume_y=volume.y;
     // bhControlDoor (door.c:395) zeichnet das Tuermodell und ryExcuteFade nur,
     // solange das Abschlussbit 0x40 fehlt; nach bhExitDoor (system.c:1003/1006,
     // Modus 6) und im Direktfall (Modus 10) wird kein DoorWrk-Modell gezeichnet.

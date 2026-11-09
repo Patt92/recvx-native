@@ -183,7 +183,7 @@ void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& 
         if(!scene.mirror_enabled)throw std::runtime_error("mirror pass triangle without njMirror matrix");
         return &mirror_view;};
     near=std::max(near,0.001f);
-    last_clip_={{near,far}};
+    last_clip_={{near,far}};last_clip_volume_={{volume_x,volume_y}};
     std::vector<Setup> setups;setups.reserve(scene.triangles.size());
     // F05: receivers carry the same transported vertex depth as the modifier
     // (Ps2AddPrim3D*/Mod: clamp(-a-b*q), integer vertex Z, screen-linear).

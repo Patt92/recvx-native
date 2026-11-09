@@ -1,6 +1,7 @@
 #pragma once
 #include "door_core.h"
 #include "renderer.h"
+#include "view_clip.h"
 #include <filesystem>
 namespace recvx {
 struct DoorRequest {
@@ -42,7 +43,7 @@ public:
     float clip_near()const{return clip_near_;}
     float clip_far()const{return clip_far_;}
     bool clip_case()const{return clip_case_;}
-    void draw(SoftwareRenderer& renderer);
+    void draw(SoftwareRenderer& renderer,ClipVolume volume={});
     void light_scene(Scene& scene)const;
 private:
     DoorRequest request_{};

@@ -293,7 +293,7 @@ unsigned GameOver::blasts()const{return impl_->blasts;}
 unsigned GameOver::unsupported_blasts()const{return impl_->unsupported_blasts;}
 
 
-void GameOver::draw(SoftwareRenderer& image,const GameUi& ui)const{
+void GameOver::draw(SoftwareRenderer& image,const GameUi& ui,ClipVolume volume)const{
     const auto& g=*impl_;
     if(!g.running)return;
     if(g.md1!=0){
@@ -355,6 +355,8 @@ void GameOver::draw(SoftwareRenderer& image,const GameUi& ui)const{
             // (0, 10, 35), angles 0, pers 11832 (gameover.c:313-327); the mesh above is built in
             // camera space and moved by the same translation, so one view matrix serves both.
             SceneCamera camera;camera.position={0.f,10.f,35.f};camera.angles={0,0,0};camera.distance=0.f;camera.perspective=kPerspective;camera.clip_near=2.f;camera.clip_far=20000.f;
+            // gameover.c:244 schreibt nur njClipZ, nicht _Make_ClipVolume.
+            camera.clip_volume_x=volume.x;camera.clip_volume_y=volume.y;
             death_scene_append(scene,camera,body);
         } else if(!body.triangles.empty()){
             // Ohne Raumbesitzer (Werkzeug/Test) gibt es keinen Lichtzustand; der Koerper bleibt mit seinen Grundfarben.
@@ -369,7 +371,7 @@ void GameOver::draw(SoftwareRenderer& image,const GameUi& ui)const{
         // angles 0) for the body and the effects in world space; the mesh is built
         // in cmat space and was moved by (0, 10, 35) above so the same view serves it.
         if(death)njTranslate(&view,0,-10.f,-35.f);
-        image.draw_view(scene,view,focal*recvx_aspect_x(),focal*(float(image.height())/480.f)/(float(image.width())/640.f),false,{},2.f,20000.f);
+        image.draw_view(scene,view,focal*recvx_aspect_x(),focal*(float(image.height())/480.f)/(float(image.width())/640.f),false,{},2.f,20000.f,volume.x/recvx_widescreen_scale,volume.y);
     }
     // game.c:109-112 (Task 7, vor Task 14): bhDrawScreenFade bei fade_an > 0 auf dem einen sys->fade_*.
     // Der Fade-Quader (njDrawPolygon2D, attr 0x60, pri -0.81 -> -1, ps2_NaDraw2D.c:93-104) bekommt mit

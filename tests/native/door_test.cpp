@@ -389,7 +389,9 @@ int main(int argc,char** argv){try{_Make_SinTable();
      check(!wide.clip_case()&&wide.clip_near()==2.0f&&wide.clip_far()==20000.0f,
            "the other case of the same packet was narrowed as well");
      DoorSequence other;other.begin(root,{},DoorRequest{0,0,1,0,0,0});
-     check(!other.clip_case(),"another door type matched the dmo_clip case");}
+     check(!other.clip_case(),"another door type matched the dmo_clip case");
+     SoftwareRenderer rendered(320,240);wide.draw(rendered,ClipVolume{1024.f,960.f});
+     check(rendered.last_clip_volume()==std::array<float,2>{{1024.f,960.f}},"door draw lost installed ClipVolume");}
 
     // --- stair demo: mesh, original projection and image edge, not Kaidan ---
     // RM_0010 -> RM_0020 selects MRY/0072, case 1 (attribute 0x80).
