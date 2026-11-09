@@ -2,7 +2,7 @@
 
 This report counts only native mechanisms with explicit evidence. The complete original decompilation is deliberately neither the denominator nor a list of missing work.
 
-Explicit evidence scope: **93.8 %** weighted, **88.2 %** fully evidenced (658/746 mechanisms; not overall game completion).
+Explicit evidence scope: **94.0 %** weighted, **88.3 %** fully evidenced (659/746 mechanisms; not overall game completion).
 
 Event commands (bhScenarioJmpT): 223/223 bound, 0 consumed only, 0 missing.
 
@@ -14,7 +14,7 @@ Event commands (bhScenarioJmpT): 223/223 bound, 0 consumed only, 0 missing.
 | Player/combat | 63/81 | 88.9 % | 77.8 % | 18 | 0 |
 | Room/camera/door | 33/49 | 83.7 % | 67.3 % | 16 | 0 |
 | Menu/items/text | 51/64 | 87.5 % | 79.7 % | 10 | 3 |
-| Models/animation | 12/18 | 80.6 % | 66.7 % | 5 | 1 |
+| Models/animation | 13/18 | 86.1 % | 72.2 % | 5 | 0 |
 | Audio | 29/32 | 95.3 % | 90.6 % | 3 | 0 |
 | Flow/saving | 32/36 | 94.4 % | 88.9 % | 4 | 0 |
 | Platform (host-replaced) | 24/41 | 79.3 % | 58.5 % | 17 | 0 |
@@ -26,7 +26,6 @@ Only ledger entries with independent native evidence count. Matching names, orig
 - `adv.c` Adv_GameOptionScreen (missing, Original option plates for display, sound, vibration, and key configuration remain unported; OPTION opens documented host settings instead.)
 - `adv.c` CheckMcSelectPortInfoState (missing, Original memory-card port query remains unported; host slot selection reads occupied saves from the user-data directory.)
 - `adv.c` FindFirstVmDrive (missing, Original memory-card search remains unported; host saves in the platform user-data directory enable LOAD GAME when a slot is occupied.)
-- `face.c` bhControlMask:flg2-0x80 (missing, See the detailed evidence and open bindings in docs/port_ledger.tsv.)
 - `MdlPut.c` bhPutModel (partial, Mirror pass from MdlPut.c:57-79/89-111 is partially connected: qualifying models draw a second time under cam.mtx*njMirror, with light based on unmirrored cam.mtx. Player floor, enemy, and object/item flags are connected; hair and weapons rely on measured status bytes. Child enemies check their own byte. mirror_pass has two red control cases.)
 - `Motion.c` bhSetMotion:Spieler (partial, Player node pose uses the existing object tree before motion advance, including Hokan countdown. Action/event, combat, damage, grab, push, and draw edits are connected; player_motion_blend and pose traces cover transitions. Stairs, Game Over, and script-driven player motion still do not update this tree.)
 - `adv.c` AdvGetCancelButton (partial, Host Cancel is used instead of the original keytype table {32,128,64}.)
@@ -38,5 +37,6 @@ Only ledger entries with independent native evidence count. Matching names, orig
 - `cut.c` bhSetEventCamera (partial, Opcode 0x13 mode 0 now installs signed key position/angles, perspective, lock angles, and fog in both branches before event-camera initialization. Previous-key fields, cam.ln/flags, and bhSetEventHideObjLgt remain open.)
 - `effect.c` bhDrawTrsEffect3D (partial, See the detailed evidence and open bindings in docs/port_ledger.tsv.)
 - `effsub1.c` bhEff009 (partial, See the detailed evidence and open bindings in docs/port_ledger.tsv.)
+- `effsub1b.c` bhDraw136 (partial, See the detailed evidence and open bindings in docs/port_ledger.tsv.)
 
 Generated with `python3 tools/port_check.py --markdown docs/PORT_STATUS.md`.

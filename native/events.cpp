@@ -556,7 +556,7 @@ int EventVm::instruction(Task& t,std::size_t& cursor){
     case 0x5d:{v.require(p,6);const unsigned bit=v.u8(p+1),mode=v.u8(p+2);advance(6);
         if(flags[12][0]&0x80u)return 1;
         if(!pad_state)throw std::runtime_error("pad condition requires native input binding");
-        const auto state=pad_state();const unsigned ps=state.first,on=state.second;const unsigned mask=1u<<(bit&31u);const bool quiet=(ps&0xE000u)!=0;
+        const auto state=current_pad();const unsigned ps=state.first,on=state.second;const unsigned mask=1u<<(bit&31u);const bool quiet=(ps&0xE000u)!=0;
         bool hit=false;switch(mode){
         case 0:hit=!quiet&&(ps&mask)!=0;break;
         case 1:hit=!quiet&&(on&mask)!=0;break;
@@ -658,18 +658,25 @@ void EventVm::check_event_deadline(){
         flags[6][0]=0x20;flags[5][0]&=~0x200u;flags[11][0]|=0x400u;flags[12][0]&=~0x4000u;flags[12][0]|=0x100u;player_flags|=0x10002u;game_over_requested=true;set_flag(1,70,1);
     }
 }
+void EventVm::pad_backup(){
+    // hitchk.c:4796-4798/4831-4833: der Pad-Stand des Durchlaufs, in dem bhCheckExmAtari die Meldung oder die
+    // Untersuchungskamera anfordert; pad_ps wird danach 0 (pad_clear_request_).
+    if(pad_state){const auto s=pad_state();pad_backup_.on=s.second;pad_backup_.ps=s.first;}else pad_backup_.on=pad_backup_.ps=0;
+    pad_backup_.old=pad_old_state?pad_old_state():0;
+}
 void EventVm::control_exm(){
     // bhMainSequence (game.c:115-286) for the bhCheckExmAtari requests of this pass.
     // sys->pad_ps = 0 aus dem Spielerpass (hitchk.c:4800/4835) gilt fuer den Rest des
     // Durchlaufs; die Anfrage kommt aus dem Hosteingang vor diesem Pass.
     pad_cleared_=pad_clear_request_;pad_clear_request_=false;
-    pad_consumed_=0;
+    pad_consumed_=0;pad_restored_.reset(); // neuer Durchlauf: bhSetPad hat pad_on/pad_ps neu gesetzt
     auto& st=flags[5][0];auto& sp=flags[6][0];auto& cb=flags[10][0];auto& gm=flags[11][0];
     const unsigned pad_ps=pad_cleared_||!pad_state?0u:pad_state().first; // hitchk.c: sys->pad_ps = 0
     if((st&0x200000)&&!(cb&1)){ // :115
         st&=~0x200080u;if(cb&0x20000000){cb|=0x1000;cb&=~0x20000000u;}if(!(cb&4))st&=~4u;
         sp=0xffffffffu;if(presentation_flags)presentation_flags(0,3);
-        if(!(gm&0x20000)){st&=~1u;gm|=0x800;}}
+        if(!(gm&0x20000)){st&=~1u;gm|=0x800;}
+        pad_restore();} // :142-144
     message_release(); // :147
     if(cb&0x8){ // :196
         cb&=~0x8u;sp=0x38;if(!(exm_attr&0x20))sp|=0x80;
@@ -702,7 +709,8 @@ void EventVm::message_release(){
         st&=~0x400200u;
         if(st&0x2000){
             sp=0xffffffffu;st&=~0x2200u;if(!(cb&4))st&=~4u;
-            pad_cleared_=true;} /* :175-177 pad_on/ps/old := pad_*b, der Host liest das Pad je Durchlauf nur einmal */
+            pad_cleared_=true; /* sp_flg stand bis hier auf 0x30 (:239): der Spielerpass dieses Bildes laeuft im Original nicht, nativ folgt er diesem Schritt und darf die Tasten nicht sehen */
+            pad_restore();} /* :175-177 pad_on/ps/old := pad_*b */
         if(st&0x80){st&=~0x80u;if(presentation_flags)presentation_flags(0,3);if(!(gm&0x20000)){st&=~1u;gm|=0x800;}}
         end_message();}
 }
@@ -718,9 +726,9 @@ void EventVm::message_complete(){
 void EventVm::tick(){
     // bhMainSequence laeuft auch dann, wenn der Aufrufer nur den Ereignispass faehrt (Testharness,
     // Terminalzweig); im Runtimepfad hat control_exm die beiden Schritte schon erledigt.
-    if(!main_sequence_done_){pad_cleared_=pad_clear_request_;pad_clear_request_=false;pad_consumed_=0;message_release();message_complete();}
+    if(!main_sequence_done_){pad_cleared_=pad_clear_request_;pad_clear_request_=false;pad_consumed_=0;pad_restored_.reset();message_release();message_complete();}
     main_sequence_done_=false;
-    ++tick_count;service_pickup();const bool cinematic=flags[10][0]&4;if(dialog_.active()){values[7]=dialog_.selection;pad_consumed_|=0x1800u;} /* message.c:233/327/349 liest OK und Cancel */ /* bhSysCallEvent: bhControlMessage vor bhControlEvent, mit den Tasten dieses Durchlaufs (message.c:50). */{const auto step=dialog_.update();if(dialog_.moved()){pad_consumed_|=0x0cu;if(system_se)system_se(2);} /* message.c:275/284 */if(step==MessageDialog::Step::Answered)close_dialog(true);else if(step==MessageDialog::Step::Closed){flags[10][0]|=0x2000;if(flags[5][0]&0x2000){flags[5][0]&=~0x2204u;flags[6][0]=0xffffffff;} /* message.c:312 */if(opening_hint_)status_requested=true;opening_hint_=false;finish_pickup();}if(dialog_.active())values[7]=dialog_.selection;
+    ++tick_count;service_pickup();const bool cinematic=flags[10][0]&4;if(dialog_.active()){values[7]=dialog_.selection;pad_consumed_|=0x1800u;} /* message.c:233/327/349 liest OK und Cancel */ /* bhSysCallEvent: bhControlMessage vor bhControlEvent, mit den Tasten dieses Durchlaufs (message.c:50). */{const auto step=dialog_.update();if(dialog_.moved()){pad_consumed_|=0x0cu;if(system_se)system_se(2);} /* message.c:275/284 */if(step==MessageDialog::Step::Answered)close_dialog(true);else if(step==MessageDialog::Step::Closed){flags[10][0]|=0x2000;if(flags[5][0]&0x2000){flags[5][0]&=~0x2204u;flags[6][0]=0xffffffff;pad_restore();} /* message.c:312-320 */if(opening_hint_)status_requested=true;opening_hint_=false;finish_pickup();}if(dialog_.active())values[7]=dialog_.selection;
     // sys->st_flg ist eine Variable: die Meldungsbits, die bhControlMessage schreibt (0x1000
     // Seite fertig, 0x4000 Ende, 0x8000 Auswahl, 0x800/0x400 Wartezeit, 0x80000 Vorauswahl),
     // liest das Raumskript per bhFlagCk Typ 5 (RM_1050 Ereignis 34: WHILE !(st_flg & 0x1000),
@@ -997,7 +1005,7 @@ bool EventVm::interact(NJS_POINT3 pos,Angle yaw,int floor,NJS_POINT3 front,float
         // hitchk.c:4786-4843 (case 3): both the camera and the message wait for st_flg 0x80 to clear.
         if(a.type==3&&!(flags[5][0]&0x80)){
             if(a.attribute&9){
-                fixcno=a.parameters[0];fixkno=a.parameters[2];exm_attr=a.attribute;pad_clear_request_=true;
+                fixcno=a.parameters[0];fixkno=a.parameters[2];exm_attr=a.attribute;pad_backup();pad_clear_request_=true; // :4796-4799
                 flags[11][0]|=0x1000;if(a.attribute&8)flags[11][0]|=0x10000;else flags[11][0]&=~0x10000u;
                 flags[5][0]|=0x80|0x4;flags[10][0]|=0x8;
                 if(exm_cut_effect)exm_cut_effect(); // cam.flg 0x20 -> ef_flg 0x10
@@ -1006,7 +1014,7 @@ bool EventVm::interact(NJS_POINT3 pos,Angle yaw,int floor,NJS_POINT3 front,float
                 // hitchk.c bhCheckExmAtari -> bhSetMessage: interaction work,
                 // response/end bits and page selection start afresh.
                 show_dialog(read_message(room_,messages_,a.parameters[1]),a.parameters[1]);
-                if(!(a.attribute&9))pad_clear_request_=true;
+                if(!(a.attribute&9)){pad_backup();pad_clear_request_=true;} // :4831-4834
                 flags[10][0]|=0x20;flags[5][0]|=0x2204;
             }
         }

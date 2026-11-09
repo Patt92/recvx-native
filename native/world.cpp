@@ -1140,12 +1140,12 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
     if(op==0xa){const auto index=v.u8(1);if(index>=walls_.size())throw std::runtime_error("script wall outside table");if(v.u8(2))walls_[index].flags&=~1u;else walls_[index].flags|=1;update_ground_geometry();return true;}
     // event.c bhMaskSet/Start, bhFacePauseSet/ReSet/Rep, bhControlMask.
     if(op==0x3c||op==0x3d||op==0x3e||op==0x3f||op==0x8f||op==0x90||op==0x9a){const auto index=v.u8(op==0x90||op==0x8f||op==0x9a?1:2);auto& e=entity(1,index);const auto& m=model(1,index);if(!m.actor||!m.actor->face())return false;
-        if(op==0x3c){const auto seq=v.u8(3);if(seq>=face_sequences_.size())return true;if(!face_sequence_ids_[seq]||face_sequence_ids_[seq]==e.identity){e.face_keys=face_sequences_[seq];e.face_frame=0;}}
+        if(op==0x3c){const auto seq=v.u8(3);if(seq>=face_sequences_.size())return true;e.face_request=true; /* face.c:286 exp0[0] |= 0x8, auch bei fremder Maskenkennung */if(!face_sequence_ids_[seq]||face_sequence_ids_[seq]==e.identity){e.face_keys=face_sequences_[seq];e.face_frame=0;}}
         if(op==0x3d){e.lip_bank=v.u8(1);if(v.u8(3)<lip_sequences_.size())e.lip_stream=lip_sequences_[v.u8(3)];}
         if(op==0x3f){if(!v.u8(3))e.face_flags|=4;else e.face_flags&=~4u;}
         if(op==0x3e){if(!v.u8(3))e.face_flags|=1;else e.face_flags&=~1u;}
         if(op==0x8f){if(!v.u8(2))e.face_flags|=16;else e.face_flags&=~16u;}
-        if(op==0x90){e.face_keys.clear();e.face_frame=0;e.face_flags&=~0x31u;}
+        if(op==0x90){e.face_keys.clear();e.face_frame=0;e.face_flags&=~0x31u;e.face_request=true; /* event.c:6513 exp0[0] |= 0x20 */}
         if(op==0x9a){if(!v.u8(2))e.face_flags|=2;else e.face_flags&=~2u;}return true;}
     if(op==0x13||op==0x2a)monitor_.active=false; // event.c:934/999 bhCamSet/bhCamSet2: cam.flg &= ~0x46 beendet die Monitorkamera (0x40)
     if(op==0x13){if(v.u8(1)==1){return_to_cut();restore_camera_clip_=true;return true;}set_event_camera(v.u8(2),v.u8(3),true);return true;}
@@ -3327,7 +3327,15 @@ void RoomWorld::draw_ntx2d_effects(SoftwareRenderer& image,unsigned pass)const{
 }
 // face.c:79 bhControlMask / fmSetLipSyncParam fuer einen Besitzer mit Maske.
 void RoomWorld::control_mask(WorldEntity& e,const PlayerAsset& actor){const auto& base=actor.face()->keys();const auto& keys=e.face_keys.empty()?base:e.face_keys;auto param=sample_face_parameters(keys,e.face_frame);
-        if((e.face_flags&4)&&!e.lip_stream.empty()){
+        // face.c:96-106: pp->flg2 0x80 faellt nach mehr als einem Bild ohne Aenderung (exp0[272]); gm_flg 0x200
+        // (bhEff111 Monitorbild), bhSetMask/bhFaceReSet (exp0[0] 0x8/0x20), ein laufender Lippenstrom (:160) und
+        // der Bildvorschub (:203) oeffnen es wieder. Das Tor liegt im Gegnerwerk (flg2) oder in face_gate.
+        auto gate_set=[&](bool closed){if(e.enemy_bound){if(closed)e.enemy.flg2|=0x80u;else e.enemy.flg2&=~0x80u;}else e.face_gate=closed;};
+        auto gate_open=[&]{gate_set(false);e.face_still=0;};
+        if(!e.face_gate_closed()){if(++e.face_still>1)gate_set(true);}
+        if(collision_events_&&(collision_events_->flags[11][0]&0x200u))gate_set(false);
+        if(e.face_request){e.face_request=false;gate_open();}
+        if((e.face_flags&4)&&!e.lip_stream.empty()){gate_open(); // :160 lip->flag != 0
             // face.c:139 only latches exp0[268] into LIP_WORK.top/ptr while
             // lip->flag == 0, so a later bhSetLip cannot retarget this cursor.
             if(!e.lip_active){e.lip_current_stream=e.lip_stream;e.lip_pos=e.lip_count=e.lip_time=0;e.lip_active=true;}
@@ -3336,8 +3344,10 @@ void RoomWorld::control_mask(WorldEntity& e,const PlayerAsset& actor){const auto
             const auto offset=e.lip_bank*6;if(offset+std::max(e.lip_cur,e.lip_next)>=base.size())throw std::runtime_error("lip parameter outside MASK bank");const auto a=lip_face_parameter(base[offset+e.lip_cur]),b=lip_face_parameter(base[offset+e.lip_next]);FaceParameter lip=a;
             if(e.lip_active&&int(e.lip_time)-int(e.lip_count)<10){const float rate=e.lip_time<10?float(e.lip_count)/float(e.lip_time):float(10-(int(e.lip_time)-int(e.lip_count)))/10;lip=interpolate_face_parameters(a,b,rate,e.lip_time<10?e.lip_time/10.f:1,0x3fff000);}
             for(unsigned j=0;j<32;++j)if(0x3fff000u&(1u<<j))param.muscle[j]=lip.muscle[j];param.jawang=lip.jawang;param.jawtrans=lip.jawtrans;param.tangx=lip.tangx;param.tangy=lip.tangy;param.tangz=lip.tangz;if(e.lip_active)e.lip_count+=2;
-        }else e.lip_active=false;e.facial=param;
-        if((e.face_flags&1)&&!(e.face_flags&16)){++e.face_frame;const auto last=unsigned(keys.back().frame);if(e.face_frame>=last){if(e.face_flags&2)e.face_frame=0;else {e.face_frame=last?last-1:0;e.face_flags&=~1u;}}}
+        }else e.lip_active=false;
+        if((e.face_flags&1)&&!(e.face_flags&16)){++e.face_frame;const auto last=unsigned(keys.back().frame);if(e.face_frame>=last){if(e.face_flags&2)e.face_frame=0;else {e.face_frame=last?last-1:0;e.face_flags&=~1u;}}else gate_open();} // :203
+        // :228 sys->loop_now == loop_ct - 1 (nativ ein Durchlauf je Bild): fmCnkCalcFace nur bei offenem Tor.
+        if(!e.face_gate_closed())e.facial=param;
     }
 // Zeichenreihenfolge der Nachbilder eines Bildes (effect.c:929/935): erst die ef_fnc-Liste
 // in Platzreihenfolge, dann ef_Zanzo[5..0]; ein spaeterer Satz ueberschreibt den Platz.

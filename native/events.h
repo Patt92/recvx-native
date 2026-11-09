@@ -5,6 +5,7 @@
 #include "scene.h"
 #include <array>
 #include <functional>
+#include <optional>
 #include <set>
 namespace recvx {
 struct EventCommand {unsigned opcode=0,task=0,event=0;std::size_t offset=0;std::vector<std::uint8_t> bytes;unsigned loop_remaining=0,loop_total=0;unsigned simulation_flags=~0u;};
@@ -97,6 +98,16 @@ public:
     // newly pressed logical bits (edge), pad_on the held ones (bhSetPad).
     std::function<std::pair<unsigned,unsigned>()> pad_state;
     std::function<unsigned()> player_yaw; // plp->ay
+    // sys->pad_old (pad.c:140: pad_on des vorigen bhSetPad). Nur fuer die Sicherung pad_oldb (hitchk.c:4798/4833).
+    std::function<unsigned()> pad_old_state;
+    // game.c:142-144/175-177, message.c:318-320: sys->pad_on/pad_ps/pad_old := pad_onb/pad_psb/pad_oldb. Der
+    // Ruecktausch gilt fuer den Rest des Durchlaufs (Task 8 liest pad_ps/pad_on, 0x5d bhPadCk) und fuer das
+    // naechste bhSetPad, das pad_old = pad_on uebernimmt (pad.c:140); pad_ps rechnet dort gegen pad_oncpy,
+    // das der Ruecktausch nicht schreibt (:275). Der Host holt den Satz am Taktende ab.
+    struct PadBackup {unsigned on=0,ps=0,old=0;};
+    std::optional<PadBackup> take_pad_restore(){auto v=pad_restored_;pad_restored_.reset();return v;}
+    // sys->pad_ps/pad_on, wie Task 8 sie in diesem Durchlauf liest (nach dem Ruecktausch pad_psb/pad_onb).
+    std::pair<unsigned,unsigned> current_pad()const{if(pad_restored_)return {pad_restored_->ps,pad_restored_->on};return pad_state();}
     // bhObjDposCk (event.c:7605): obwp[n].ay und rom->enep[n] -> mdl->objP[node].ang[0].
     std::function<bool(unsigned,int&)> object_ay_get;
     std::function<void(unsigned,int)> object_ay_set;
@@ -202,6 +213,10 @@ public:
 private:
     bool door_scenario_pending_=false;
     bool pad_cleared_=false; // hitchk.c sys->pad_ps = 0 for the rest of the pass
+    PadBackup pad_backup_;                  // sys->pad_onb/pad_psb/pad_oldb
+    std::optional<PadBackup> pad_restored_; // Ruecktausch dieses Durchlaufs (game.c:142/175, message.c:318)
+    void pad_backup();                      // hitchk.c:4796-4798/4831-4833
+    void pad_restore(){pad_restored_=pad_backup_;}
     bool pad_clear_request_=false; // dieselbe Anfrage aus dem Hosteingang vor dem Ereignispass
     unsigned pad_consumed_=0; // Tastenflanken, die bhControlMessage in diesem Takt gelesen hat
     bool request_door(const DoorRequest& request,bool script); // script: DoorCall 0x33 (bhSetDoorDemo), sonst bhCheckExmAtari

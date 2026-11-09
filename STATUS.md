@@ -23,6 +23,20 @@ current code, working tree and installed runtime.
 
 ## Working tree and delivery
 
+**Face gate and pad restore (working tree, 2026-11-09):** `bhControlMask`'s
+calculation gate (face.c:96-106/228, `flg2` 0x80 after more than one unchanged
+frame, reopened by gm_flg 0x200, bhSetMask/bhFaceReSet, a running lip stream and
+the frame advance) is ported in `RoomWorld::control_mask`; closed, `facial` keeps
+its state. The pad backup of bhCheckExmAtari (hitchk.c:4796/4831) and its restore
+(game.c:142/175, message.c:318) are ported in `EventVm` (`pad_backup`,
+`take_pad_restore`): Task 8 reads `pad_psb`/`pad_onb` for the rest of the pass, the
+host takes the set at the end of the tick (`pad_old = pad_on` in the next bhSetPad,
+`io.pad_old` of the player pad). Tests `original_face_control_mask` (new CTest with
+data) and `inventory_events_assets`, both with red counter-checks. Development
+binary and Start.command app rebuilt; CTest 265/269, the four red suites
+(`ios_bundle_structure`, `hd_texture_build`, `netplay_lockstep`,
+`rm0110_event_zombie`) were red before this change (baseline worktree 2026-11-05).
+
 **CI host-process fix (working tree):** GitHub run `42019945546` failed in
 `native/host_process.cpp`: missing `<cstring>` on Linux, unavailable spawn APIs
 on Android API 26 and unavailable spawn chdir on iOS. Explicit headers and an

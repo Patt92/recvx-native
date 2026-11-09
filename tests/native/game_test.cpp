@@ -380,15 +380,26 @@ int main(int argc,char** argv){try{
         unsigned pt=~0u,cut_calls=0,event_cno=~0u,event_kno=~0u,returns=0,lights=0;
         exm.presentation_flags=[&](unsigned clear,unsigned set){pt=(pt&~clear)|set;};exm.exm_light_off=[&]{++lights;};
         exm.fixed_cut=[&](unsigned){++cut_calls;};exm.event_fixed_cut=[&](unsigned c,unsigned k){event_cno=c;event_kno=k;};exm.return_cut=[&]{++returns;};
-        exm.pad_state=[]{return std::pair<unsigned,unsigned>{0x200|0x800,0x200|0x800};};
+        unsigned live_ps=0x200|0x800,live_on=0x200|0x800;exm.pad_state=[&]{return std::pair<unsigned,unsigned>{live_ps,live_on};};exm.pad_old_state=[]{return 0x1u;};
         const bool hit=exm.interact({5,0,2},32768,0); // 0xb80e admits only (ay+0x2000)&0xc000 == 0x8000
         check(hit&&text.active()&&(exm.flags[5][0]&0x2284)==0x2284&&exm.exm_attr==0xb80e&&exm.fixcno==4&&exm.fixkno==7,"examined camera request incomplete");
         exm.control_exm();
         check(exm.flags[6][0]==0xb8&&!(pt&3)&&lights==1&&event_cno==4&&event_kno==7&&!cut_calls&&(exm.flags[5][0]&1)&&!(exm.flags[11][0]&0x1000)&&!(exm.flags[5][0]&0x200000),"examined camera pass differs from game.c (sp 0xb8, pt ~3, bhSetEventFixedCut)");
         text.show({33,0xffff},0);for(unsigned k=0;k<4&&!text.closable();++k)exm.tick();exm.confirm_dialog(); // erst die aufgebaute Seite schliesst (game.c:264)
         exm.control_exm(); // game.c:264 setzt das Meldungsende
+        check(!exm.take_pad_restore()&&exm.current_pad()==std::pair<unsigned,unsigned>{0x200u|0x800u,0x200u|0x800u},"no pad restore before game.c:175");
+        live_ps=0x2;live_on=0x2; // Taste eines spaeteren Durchlaufs
         exm.control_exm(); // game.c:147 gibt frei, der 0x80-Zweig beendet die Untersuchungskamera, :286 kehrt zurueck
         check(!(exm.flags[5][0]&0x81)&&(pt&3)==3&&exm.flags[6][0]==0xffffffffu&&returns==1,"closing the examined message keeps the camera");
+        // hitchk.c:4796-4798 sicherte pad_on/pad_ps/pad_old der Anforderung; game.c:175-177 tauscht sie am Ende des
+        // Passes zurueck: Task 8 (0x5d bhPadCk) liest in diesem Durchlauf pad_psb/pad_onb, der Host uebernimmt den
+        // Satz am Taktende (pad_old = pad_on im naechsten bhSetPad).
+        check(exm.current_pad()==std::pair<unsigned,unsigned>{0x200u|0x800u,0x200u|0x800u},"Task 8 must read pad_psb/pad_onb for the rest of the pass");
+        const auto restored=exm.take_pad_restore();
+        check(exm.current_pad()==std::pair<unsigned,unsigned>{0x2u,0x2u},"after the hand-over the live pad applies again");
+        check(restored&&restored->on==(0x200u|0x800u)&&restored->ps==(0x200u|0x800u)&&restored->old==0x1u,"game.c:175-177 must restore the hitchk.c:4796 pad backup");
+        check(!exm.take_pad_restore(),"pad restore is handed over once");
+        exm.control_exm();check(!exm.take_pad_restore(),"a new pass without message end restores nothing");
     }
     { // event.c:994 bhCamSet2 case 0 (RM_0090 security boxes: 2a 00 09 00): fixcno = v1, and
       // bhSetFixedCut clears gm_flg 0x1000 at once, so game.c:274 never re-cuts to a stale fixcno.

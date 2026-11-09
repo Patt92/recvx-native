@@ -46,6 +46,12 @@ struct WaterWaveWork {unsigned mode0=0;int ct0=0,ct1=0,ct2=0,ct3=0;float xn=0,zn
     bool range_gap=false;};
 struct WorldEntity {
     std::vector<FaceParameter> face_keys;unsigned face_frame=0,face_flags=0;
+    // face.c:96-106/228 Rechentor des Gesichts: face_still = exp0[272] (Bilder ohne Aenderung), das Tor ist
+    // pp->flg2 0x80 (im Gegnerwerk enemy.flg2, sonst face_gate). Geschlossen laeuft fmCnkCalcFace nicht,
+    // facial (dst-Netz) und objP[7/9/11/13].ang behalten ihren Stand. face_request = exp0[0] 0x8/0x20
+    // (bhSetMask/bhFaceReSet), das bhControlMask im naechsten Durchlauf mit Zaehler und Tor zuruecksetzt.
+    unsigned face_still=0;bool face_gate=false,face_request=false;
+    bool face_gate_closed()const{return enemy_bound?(enemy.flg2&0x80u)!=0:face_gate;}
     // face.c:321 bhSetLip only stores the selected stream in exp0[268];
     // face.c:141 bhControlMask copies it into LIP_WORK.top/ptr while
     // lip->flag == 0. A running stream therefore keeps its own source.

@@ -3,6 +3,7 @@
 #include "binary_view.h"
 #include "room.h"
 #include <cmath>
+#include <cstring>
 #include <iostream>
 #include <stdexcept>
 static std::vector<std::uint8_t> actor_packet(const std::vector<std::uint8_t>& b,std::size_t p,std::size_t){
@@ -29,6 +30,23 @@ int main(int argc,char** argv){try{
             auto command=[&](unsigned opcode,unsigned sequence){EventCommand c;c.opcode=opcode;c.bytes={std::uint8_t(opcode),0,std::uint8_t(index),std::uint8_t(sequence)};check(world.bind(c),"real lip command not bound");};
             command(0x3d,0);command(0x3f,0);world.tick();const auto active=world.state(1,index)->lip_current_stream;check(world.state(1,index)->lip_active&&!active.empty(),"original lip stream did not activate");
             command(0x3d,3);world.tick();const auto* state=world.state(1,index);check(state->lip_stream!=active&&state->lip_current_stream==active,"bhSetLip retargeted an already active LIP_WORK cursor");
+            // face.c:96-106/228 Rechentor: ein laufender Lippenstrom haelt flg2 0x80 offen (exp0[272] = 0);
+            // ohne Aenderung faellt das Tor nach mehr als einem Bild, bhSetMask (0x3c, exp0[0] 0x8) oeffnet es
+            // im naechsten Durchlauf, der Bildvorschub einer laufenden Gesichtsfolge (0x3e) haelt es offen und
+            // es schliesst zwei Bilder nach dem Ende der Folge. Geschlossen bleibt facial unveraendert.
+            check(!state->face_gate_closed()&&state->face_still==0,"active lip stream must keep the face gate open");
+            command(0x3f,1);world.tick();state=world.state(1,index);check(!state->lip_active,"lip stop (0x3f mode 1) must end the stream");
+            check(!state->face_gate_closed()&&state->face_still==1,"first unchanged frame: exp0[272] 1, gate still open");
+            world.tick();check(world.state(1,index)->face_gate_closed(),"gate must close after two unchanged frames (exp0[272] > 1)");
+            const auto frozen=*world.state(1,index)->facial;
+            command(0x3c,0);world.tick();state=world.state(1,index);check(!state->face_gate_closed()&&state->face_still==0,"bhSetMask request must reopen the gate");
+            command(0x3e,0);unsigned open_frames=0;while(world.state(1,index)->face_flags&1u){world.tick();if(!world.state(1,index)->face_gate_closed())++open_frames;check(open_frames<400,"face sequence never ends");}
+            check(open_frames>0,"frame advance must keep the gate open");
+            check(!world.state(1,index)->face_gate_closed(),"end frame (face.c:187, no reset): exp0[272] 1 keeps the gate open");
+            world.tick();check(world.state(1,index)->face_gate_closed(),"gate closes one frame after the sequence ended");
+            const auto held=*world.state(1,index)->facial;world.tick();world.tick();
+            check(std::memcmp(&held,&*world.state(1,index)->facial,sizeof(FaceParameter))==0,"closed gate must keep facial");
+            (void)frozen;
         }
         for(const auto room:{"RM_0030","RM_0040"}){const auto bytes=read_asset_file(data/"rooms"/(std::string(room)+".RDT"),64*1024*1024);BinaryView v(bytes);const auto header=inspect_room(bytes).room_offset;const auto table=v.u32(20),enep=v.u32(header+8);unsigned slot=1;
             for(unsigned i=0;i<v.u32(header+0x88);++i){if(!(v.u32(enep+i*36)&1))continue;const auto model=v.u32(table+slot++*4);if(v.u16(enep+i*36+4)<90)continue;PlayerAsset actor(actor_packet(bytes,model,0),true);check(actor.face()!=nullptr,"real cinematic MASK absent");MotionClip clip;clip.frames=1;clip.positions.resize(actor.bones());clip.angles.resize(actor.bones());const auto neutral=actor.sample_clip(clip,0);bool moved=false;
