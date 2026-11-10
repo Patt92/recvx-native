@@ -439,11 +439,6 @@ void GameUi::reload_textures(){
     Scene fonts;fonts.textures.resize(4);apply_texture_files(fonts,data_,mods_,"fonts");
     for(const auto& font:fonts.textures)if(!font.width)throw std::runtime_error("missing cooked font atlas under "+(data_/"textures/fonts").string());
     fonts_=std::move(fonts.textures);
-    dialog_fonts_=fonts_;
-    // The original atlas includes a dark edge and a muted cream glyph core.
-    // Map that ramp to black/white for dialogue, retaining its antialiasing and alpha.
-    for(auto& font:dialog_fonts_){unsigned low=255,high=0;for(auto c:font.pixels)if(c>>24){const auto value=std::max({c&255,(c>>8)&255,(c>>16)&255});low=std::min(low,value);high=std::max(high,value);}
-        if(high>low)for(auto& c:font.pixels)if(c>>24){const auto value=std::max({c&255,(c>>8)&255,(c>>16)&255});const auto shade=(value-low)*255/(high-low);c=(c&0xff000000)|shade*0x010101;}}
     item_models_.clear();file_textures_.clear();title_.clear();typewriter_textures_.clear();
 }
 GameUi::GameUi(const std::filesystem::path& data,const std::filesystem::path& mods):data_(data),mods_(mods){
@@ -730,8 +725,8 @@ void GameUi::text(SoftwareRenderer& image,const Message& message,int x,int y,flo
         if(c==0xff03){if(i+1>=part.size())break;if(depth>=4)throw std::runtime_error("recursive item-name message");write(read_message(messages_,4,part[++i]),depth+1);continue;}
         // FF04 (message.c:133-149): mes_sps[mes_seln] = Lage vor dem Vorschub; dort zeichnet bhControlMessage
         // den Auswahlcursor als Schriftzeichen 28 (bhDispFont(&mes_sps[mes_sel], 28, 0, -0.9), :297-303).
-        if(c==0xff04){if(choice++==selected_choice)blit(image,(dialogue?dialog_fonts_:fonts_)[0],x,y,int(28*scale),int(28*yscale),(28%18)*14,(28/18)*14,(28%18)*14+14,(28/18)*14+14,color);x+=int(28*scale);continue;}if(c>=0xfe00){if(c<0xff00)color=font_color(c);continue;}if(c/324>=fonts_.size())continue;
-        const auto glyph=c%324;blit(image,(dialogue?dialog_fonts_:fonts_)[c/324],x,y,int(28*scale),int(28*yscale),(glyph%18)*14,(glyph/18)*14,(glyph%18)*14+14,(glyph/18)*14+14,color);
+        if(c==0xff04){if(choice++==selected_choice)blit(image,fonts_[0],x,y,int(28*scale),int(28*yscale),(28%18)*14,(28/18)*14,(28%18)*14+14,(28/18)*14+14,0xffffffffu);x+=int(28*scale);continue;}if(c>=0xfe00){if(c<0xff00)color=font_color(c);continue;}if(c/324>=fonts_.size())continue;
+        const auto glyph=c%324;blit(image,fonts_[c/324],x,y,int(28*scale),int(28*yscale),(glyph%18)*14,(glyph/18)*14,(glyph%18)*14+14,(glyph/18)*14+14,color);
         x+=int((c<std::size(FontSz)?FontSz[c]:28)*scale);
       }
     };write(message,0);
@@ -1008,7 +1003,7 @@ void GameUi::draw_box(SoftwareRenderer& image,const Inventory& inv,const StatusM
     const auto packed=selecting?inv.items[base+index]:inv.slots()[menu.selected];if(menu.message.active()){text(image,menu.message.visible(),44+dx(6),342+dy(6),1,0xffffffff,true,menu.message.cursor_drawn());
         if(menu.message.arrow_drawn())text(image,Message{29,0xffff},212+dx(6),432+dy(6),1,0xffffffff,true);} /* mes_spos[1][2..3] (message.c:9-13, :341-344) */else if(note)text(image,system_message(note),44+dx(6),342+dy(6),1,0xffffffff,true);else if(Inventory::id(packed))text(image,read_message(messages_,4,inventory_name_id(packed)),44+dx(6),342+dy(6),.95f);
 }
-void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu& menu,const MessageDialog& dialog,unsigned tick){
+void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu& menu,const MessageDialog& dialog,unsigned tick,unsigned task_stop_flags,bool movie_task){
     // Waehrend bhSysCallMonitor Modus 5 laeuft Task 9 nicht und zeichnet nichts; Task 7 zeichnet
     // den Raum samt Blende, danach bleibt das Bild schwarz (system.c:1987-2013).
     if(menu.screen_drawn()&&menu.files&&!menu.file_list){
@@ -1136,9 +1131,12 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
     // also zeichnet auch kein bhDispMessage. Die GetItem-Frage erscheint erst mit dem ersten Statusbild.
     if(menu.screen()&&!menu.screen_drawn())return;
     const auto& visible_dialog=menu.active&&menu.message.active()?menu.message:dialog;
-    // bhControlMessage mode 1 uses mes_spos[1], replacing the item name.
-    // Room dialogue uses mode 0; neither mode draws a background panel.
-    if(visible_dialog.active()&&std::any_of(visible_dialog.page().begin(),visible_dialog.page().end(),[](auto code){return code<0xfe00||code==0xff03;})){text(image,visible_dialog.visible(),menu.active?44:68,menu.active?342:374,1,0xffffffff,true,visible_dialog.cursor_drawn());
-        if(visible_dialog.arrow_drawn())text(image,Message{29,0xffff},menu.active?212:306,menu.active?432:434,1,0xffffffff,true);} /* mes_spos[mode][2..3] */
+    // system.c:720-728 / game.c:300-308: Ereignisdialog nach ts_flg 0x200, nicht nach menu.active.
+    // Die separate StatusMenu-Meldung gehoert weiterhin dem Statusbildschirm.
+    const bool status_dialog=(&visible_dialog==&menu.message)||!(task_stop_flags&0x200u);
+    // message.c:62-65 / ELF 0x2B76B4-0x2B76E4: Modus 0 wird bei laufendem Movie-Task intern Modus 2.
+    const int dialog_y=status_dialog?342:(movie_task&&!(task_stop_flags&0x1000u)?371:374);
+    if(visible_dialog.active()&&std::any_of(visible_dialog.page().begin(),visible_dialog.page().end(),[](auto code){return code<0xfe00||code==0xff03;})){text(image,visible_dialog.visible(),status_dialog?44:68,dialog_y,1,0xffffffff,true,visible_dialog.cursor_drawn());
+        if(visible_dialog.arrow_drawn())text(image,Message{29,0xffff},status_dialog?212:306,status_dialog?432:434,1,0xffffffff,true);} /* mes_spos[mode][2..3] */
 }
 }

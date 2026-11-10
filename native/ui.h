@@ -215,7 +215,7 @@ public:
     // Host overlays (netplay status): plain ASCII through the message font.
     void ascii(SoftwareRenderer& image,const std::string& text,int x,int y,float scale=1,std::uint32_t tint=0xffffffff)const;
     GameUi(const std::filesystem::path& data,const std::filesystem::path& mods={});
-    void draw(SoftwareRenderer& image,const Inventory& inventory,const StatusMenu& menu,const MessageDialog& dialog,unsigned tick);
+    void draw(SoftwareRenderer& image,const Inventory& inventory,const StatusMenu& menu,const MessageDialog& dialog,unsigned tick,unsigned task_stop_flags=0x200u,bool movie_task=false);
     // `row_shift` is the accumulated sub1.c ItemBoxIconSet mutation of the
     // parts_20b pos[1] values (testmode 2 `number` plus the ±38 direction
     // frame); `arrows` mirrors the parts_15b[20]/[21] anim of ItemBox testmode
@@ -253,7 +253,7 @@ private:
     // unlike MessageDialog text(). Original fonts, fractional cursor advances.
     void direct_message(SoftwareRenderer&,const Message&,float x,float y,std::uint32_t color,float sx=1,float sy=1,float line=1,unsigned count=0,bool spaces_count=false)const;
     std::map<unsigned,std::vector<SceneTexture>> file_textures_;
-    std::vector<SceneTexture> menu_,fonts_,dialog_fonts_;
+    std::vector<SceneTexture> menu_,fonts_;
     // menu_[0] wie aus ITEM1/0145 dekodiert: die Palettenbaenke (njSetPaletteBankNum) gehoeren zu diesem
     // PS2-Bild; eine HD-/Mod-Datei fuer menu/0000 ersetzt nur das Bild der Grundpalette.
     SceneTexture menu_banks_;
