@@ -276,7 +276,17 @@ policy audit unchanged, SDL static, Metal, bundle icons, signing via profile). S
 device build compile, link, PASS. **Run on the device (2026-10-26, user acceptance):** the iOS version
 runs as is on the iPhone (iOS 27) with a Bluetooth controller. `--package` without a profile now writes
 `RECVX-Native-unsigned.ipa` for sideloading (AltStore/SideStore, zsign with own certificate: paid 1 year,
-free 7 days with re-signing); touch controls open.
+free 7 days with re-signing).
+**iOS touch controls (2026-11-10, working tree):** on-screen gamepad ported from nxnative (MIT, seedds):
+`native/touch_pad.cpp` (layout, touch ownership; host test `touch_pad_layout_ownership`) and
+`native/ios_touch_pad.mm` (drawing, gear menu, haptics) feeding an SDL virtual controller, so `controls.ini`
+and OPTION rebinding apply. 2D / 3D layouts; landscape overlay; portrait and a half-open foldable put the
+picture above the controls. Checked in the iOS simulator (title menu, new game, walking, inventory,
+rotation); the hinge path needs iOS 27.1 and has not run in a simulator. **On a foldable iPhone (iOS 27.3,
+2026-11-10, hands-on by the contributor):** closed and held upright, the split layout; unfolded and held
+sideways, the overlay; unfolded upright and half open on a table, picture on the upper half and controls on
+the lower; title menu by touch, gear menu, 2D / 3D switch. Open: a play-through by touch, hiding on a real
+controller, rumble on the haptic engine.
 [Build docs](docs/NATIVE_PORT.md#ios-arm64-device-and-simulator).
 
 Shared working tree with ongoing work by others; check the current `git status --short`

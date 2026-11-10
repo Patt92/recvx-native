@@ -269,6 +269,7 @@ double process_cpu_seconds(){
 }
 #if defined(RECVX_IOS)
 #include "ios_scene.h"
+#include "ios_touch_pad.h"
 #endif
 #if defined(RECVX_IOS)
 // iOS startet ohne Kommandozeile: Spieldaten im App-Bundle (Paket mit eingebettetem data/), sonst im
@@ -2456,6 +2457,9 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         std::unique_ptr<SDL_Window,decltype(&SDL_DestroyWindow)> window(SDL_CreateWindow("RECVX native runtime",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,1280,960,SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI|recvx_presentation_window_flags),SDL_DestroyWindow);sdl_check(bool(window));
 #if defined(RECVX_IOS)
         recvx::ios_adopt_scene(window.get()); // UIScene-Lebenszyklus (iOS-27-SDK), ios_scene.mm
+#if !defined(RECVX_TVOS)
+        recvx::ios_touch_pad_attach(window.get()); // Host: on-screen gamepad as an SDL virtual controller, ios_touch_pad.mm
+#endif
         recvx::ios_fit_view(window.get());     // Startrahmen; danach nur bei RESIZED (Ereignisschleife)
 #endif
         // A starter script or terminal may keep keyboard focus; take it so the menu reacts at once.
@@ -2700,7 +2704,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                     if(netplay->local_player1()){physical=mine;physical2=theirs;}else{physical=theirs;physical2=mine;}
                     if(ntick>120)netplay->forget_before(ntick-120);}
                 trade_secondary_frame=physical2;
-                vibration.set_unit_present(devices.controllers()>0);{const unsigned level=vibration.tick();if(!netplay||netplay->local_player1())devices.rumble(level*257u,0u,level?50u:0u);}
+                vibration.set_unit_present(devices.controllers()>0||devices.touch_pad());{const unsigned level=vibration.tick();if(!netplay||netplay->local_player1())devices.rumble(level*257u,0u,level?50u:0u);}
                 if(ui){if(debug.active()){debug.apply(physical);
                     // --control: Zeilen auch bei offenem Debugmenue zustellen (debug_select/confirm/debug_key), sonst bliebe die Steuerdatei dort stehen.
                     if(debug.active()&&!control.path.empty())control_dispatch(input_tick++);

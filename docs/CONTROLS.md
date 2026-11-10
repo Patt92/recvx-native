@@ -74,6 +74,46 @@ answers Yes/No; directions choose the answer. Cancel dismisses the question
 without changing the item. For locked cases, carry a lockpick and choose Examine
 rather than Combine. Combine selects a second item for the original recipe.
 
+## Touch controls (iOS/iPadOS)
+
+The iOS build draws a gamepad over the picture and feeds it to the game as an
+ordinary controller, so every binding above, `controls.ini` and the OPTION
+screen apply to it. Keys are labelled by position in Xbox names, as the
+prompts and the table above name them.
+
+| Touch control | Controller input | Default action |
+|---|---|---|
+| Left stick (bottom left) | Left stick | Walk, turn, menus |
+| A / B / Y / X (bottom right) | A / B / Y / X | Confirm and attack / run and cancel / inventory / unbound |
+| LB / RB (top corners, lower key) | LB / RB | Next target / aim |
+| LT / RT (top corners, upper key) | Triggers | Unbound / run |
+| Back / Start (top centre) | Back / Start | Pause and cinematic skip / video skip |
+| D-pad, L3 / R3, right stick (3D layout) | D-pad, stick clicks, right stick | Walk, turn, menus / unbound / unbound |
+
+The gear at the top centre opens a menu with **Controller layout** and
+**Touch feedback**; the app remembers both.
+
+- **2D:** left stick, the four face keys, shoulders, triggers, Back and Start.
+- **3D** (default): adds a D-pad inward of the left stick, L3 / R3 in the top
+  row and a right stick that is not drawn: swipe in the right third of the
+  screen, starting anywhere off the keys.
+
+Sliding a finger across the face keys switches keys, and between two keys both
+are held. The shoulders, triggers, Back, Start and the stick clicks stay with
+the finger that pressed them. A connected game controller hides the gamepad,
+all but the gear, and it comes back when the controller disconnects. Game
+vibration plays on the iPhone's haptic engine while the touch gamepad is in
+use.
+
+In landscape the controls lie over the picture. In portrait, and on a foldable
+iPhone held half open (iOS 27.1 or later), the picture sits above the controls:
+above the fold where the system reports one, else above the middle of the
+screen.
+
+The layout and the touch rules are ported from
+[nxnative](https://github.com/seedds/nxnative) (MIT); `native/touch_pad.h`
+carries its licence. tvOS, Android and the web build have no touch controls.
+
 ## Change bindings
 
 Start in the main menu and select **OPTION**. Left/Right switches between
