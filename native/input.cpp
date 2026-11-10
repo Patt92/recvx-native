@@ -202,7 +202,11 @@ void InputManager::open(int index){if(!SDL_IsGameController(index))return;const 
 void InputManager::evaluate(bool edges){for(unsigned a=0;a<action_count;++a){bool down=false;if(focused_)for(const auto& b:config_.bindings[a]){
         if(b.kind==InputBinding::Kind::Key)down=down||(route_.keyboard&&keys_.at(b.code)&&(b.modifier<0||keys_.at(b.modifier)));else for(const auto& item:pads_){const auto& p=item.second;if(!accepts(p))continue;if(b.kind==InputBinding::Kind::Button)down=down||(p.buttons.at(b.code)&&(b.modifier<0||p.buttons.at(b.modifier)));else{const auto raw=p.axes.at(b.code);const float axis=raw<0?raw/32768.f:raw/32767.f;down=down||axis*b.direction>=(navigation(a)?config_.menu_threshold:config_.deadzone);}}}
         if(edges&&down&&!held_[a])pending_[a]=true;held_[a]=down;}}
-void InputManager::event(const SDL_Event& e){if(e.type==SDL_CONTROLLERDEVICEADDED){open(e.cdevice.which);return;}
+void InputManager::event(const SDL_Event& e){
+    // The event names a device index, which is only valid while no other device has come or gone since SDL queued
+    // it: two devices added before the queue drains (a controller connecting at launch beside the touch gamepad)
+    // shift each other's index. Open every device that is not open yet instead; open() skips the ones that are.
+    if(e.type==SDL_CONTROLLERDEVICEADDED){for(int i=0;i<SDL_NumJoysticks();++i)open(i);return;}
     if(e.type==SDL_CONTROLLERDEVICEREMOVED){auto p=pads_.find(e.cdevice.which);if(p!=pads_.end()){SDL_GameControllerClose(p->second.handle);pads_.erase(p);std::cout<<"Controller disconnected\n";}evaluate();return;}
     if(e.type==SDL_WINDOWEVENT&&e.window.event==SDL_WINDOWEVENT_FOCUS_LOST){focused_=false;keys_.fill(false);pending_.fill(false);held_.fill(false);age_.fill(0);return;}
     if(e.type==SDL_WINDOWEVENT&&e.window.event==SDL_WINDOWEVENT_FOCUS_GAINED){focused_=true;for(auto& p:pads_)refresh(p.second);evaluate(false);return;}

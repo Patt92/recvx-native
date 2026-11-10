@@ -242,6 +242,17 @@ static void virtual_controller(){
         SDL_JoystickSetVirtualAxis(touch_pad,SDL_CONTROLLER_AXIS_LEFTY,-stick_max);pump(merged);{const auto frame=merged.tick();check(frame.move()==1&&frame.gamepad_input,"touch stick up is not forward");}
         SDL_JoystickSetVirtualAxis(touch_pad,SDL_CONTROLLER_AXIS_LEFTY,0);pump(merged);merged.tick();
     }
+    {   // A queued "controller added" event names a device index that is stale once another device has come or
+        // gone: the manager opens every device that is not open yet, whatever index the event carries.
+        InputManager late(config);pump(late);const auto before=late.controllers();
+        SDL_Joystick* extra=attach(false);const auto extra_id=SDL_JoystickInstanceID(extra);
+        SDL_PumpEvents();SDL_FlushEvents(SDL_FIRSTEVENT,SDL_LASTEVENT); // SDL's own events for it are lost
+        SDL_Event stale{};stale.type=SDL_CONTROLLERDEVICEADDED;stale.cdevice.which=99;late.event(stale);
+        check(late.controllers()==before+1,"a controller-added event with a stale device index opens nothing");
+        SDL_JoystickClose(extra);
+        for(int i=0;i<SDL_NumJoysticks();++i)if(SDL_JoystickGetDeviceInstanceID(i)==extra_id){SDL_JoystickDetachVirtual(i);break;}
+        pump(late);check(late.controllers()==before,"a detached controller stays counted");
+    }
     if(present){std::cout<<"touch gamepad slots: skipped, "<<present<<" real controller(s) attached to this machine\n";return;}
     SDL_Joystick* first=attach(false);SDL_Joystick* second=attach(false);
     InputManager player1(config,{true,0}),player2(config,{false,1});pump(player1,&player2);

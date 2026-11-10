@@ -16,6 +16,7 @@
 #import <GameController/GameController.h>
 #import <CoreHaptics/CoreHaptics.h>
 #import <CoreText/CoreText.h>
+#include <TargetConditionals.h>
 #include <SDL.h>
 #include <SDL_syswm.h>
 #include <cmath>
@@ -270,6 +271,9 @@ static const Key k_locked[]={touch::TriggerL,touch::ShoulderL,touch::TriggerR,to
 -(void)padsChanged:(NSNotification*)note{ // a real controller hides the gamepad; the gear stays
     (void)note;BOOL real=NO;
     for(GCController* controller in GCController.controllers)if(controller.extendedGamepad)real=YES;
+#if TARGET_OS_SIMULATOR
+    real=NO; // the simulator always reports a built-in 'MFi Gamepad', which would keep the gamepad hidden there
+#endif
     if(real!=_pad.hidden()){
         _pad.set_hidden(real);[self publish];
         std::cout<<"Touch controls: "<<(real?"hidden, a controller is connected":"shown")<<std::endl;
