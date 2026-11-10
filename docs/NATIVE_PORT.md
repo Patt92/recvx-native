@@ -244,9 +244,10 @@ path resolution: `Library/Application Support/RECVX` inside the app container.
 A provisioning profile for a device build can come from Xcode (automatic
 signing of any project with the same bundle identifier and your team) or from
 the Apple developer portal. Building, signing and simulator start do not
-establish runtime behavior on iOS hardware. Open on iOS: on-screen touch
-controls (input currently needs a game controller or keyboard), app lifecycle
-during backgrounding, and memory limits on smaller devices.
+establish runtime behavior on iOS hardware. Input is the on-screen touch
+gamepad ([CONTROLS.md](CONTROLS.md#touch-controls-iosipados)), a game
+controller or a keyboard. Open on iOS: app lifecycle during backgrounding and
+memory limits on smaller devices.
 
 | Option | Effect |
 |---|---|
