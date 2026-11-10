@@ -282,7 +282,11 @@ free 7 days with re-signing).
 `native/ios_touch_pad.mm` (drawing, gear menu, haptics) feeding an SDL virtual controller, so `controls.ini`
 and OPTION rebinding apply. 2D / 3D layouts; landscape overlay; portrait and a half-open foldable put the
 picture above the controls. Checked in the iOS simulator (title menu, new game, walking, inventory,
-rotation); the hinge path needs iOS 27.1 and has not run in a simulator. Not yet played on a device.
+rotation); the hinge path needs iOS 27.1 and has not run in a simulator. **On a foldable iPhone (iOS 27.3,
+2026-11-10, hands-on by the contributor):** closed and held upright, the split layout; unfolded and held
+sideways, the overlay; unfolded upright and half open on a table, picture on the upper half and controls on
+the lower; title menu by touch, gear menu, 2D / 3D switch. Open: a play-through by touch, hiding on a real
+controller, rumble on the haptic engine.
 [Build docs](docs/NATIVE_PORT.md#ios-arm64-device-and-simulator).
 
 Shared working tree with ongoing work by others; check the current `git status --short`
