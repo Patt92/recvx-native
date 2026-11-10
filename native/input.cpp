@@ -194,7 +194,11 @@ InputManager::InputManager(InputConfig config,Route route):config_(std::move(con
 InputManager::~InputManager(){for(auto& item:pads_)SDL_GameControllerClose(item.second.handle);}
 void InputManager::refresh(Pad& p){for(unsigned a=0;a<p.axes.size();++a)p.axes[a]=SDL_GameControllerGetAxis(p.handle,SDL_GameControllerAxis(a));for(unsigned b=0;b<p.buttons.size();++b)p.buttons[b]=SDL_GameControllerGetButton(p.handle,SDL_GameControllerButton(b));}
 void InputManager::open(int index){if(!SDL_IsGameController(index))return;const auto id=SDL_JoystickGetDeviceInstanceID(index);if(pads_.count(id))return;
-    auto* controller=SDL_GameControllerOpen(index);if(!controller){std::cerr<<"Controller unavailable: "<<SDL_GetError()<<'\n';return;}Pad pad;pad.handle=controller;while(std::any_of(pads_.begin(),pads_.end(),[&](const auto& item){return item.second.slot==pad.slot;}))++pad.slot;refresh(pad);pads_.emplace(id,pad);std::cout<<"Controller connected: "<<SDL_GameControllerName(controller)<<'\n';evaluate(false);}
+    auto* controller=SDL_GameControllerOpen(index);if(!controller){std::cerr<<"Controller unavailable: "<<SDL_GetError()<<'\n';return;}Pad pad;pad.handle=controller;
+    pad.touch=SDL_JoystickIsVirtual(index)&&SDL_JoystickGetDeviceVendor(index)==touch_pad_vendor&&SDL_JoystickGetDeviceProduct(index)==touch_pad_product;
+    if(pad.touch)pad.slot=~0u; // no controller slot: the first real controller stays slot 0 (input.h)
+    else while(std::any_of(pads_.begin(),pads_.end(),[&](const auto& item){return item.second.slot==pad.slot;}))++pad.slot;
+    refresh(pad);pads_.emplace(id,pad);std::cout<<(pad.touch?"Touch controls connected: ":"Controller connected: ")<<SDL_GameControllerName(controller)<<'\n';evaluate(false);}
 void InputManager::evaluate(bool edges){for(unsigned a=0;a<action_count;++a){bool down=false;if(focused_)for(const auto& b:config_.bindings[a]){
         if(b.kind==InputBinding::Kind::Key)down=down||(route_.keyboard&&keys_.at(b.code)&&(b.modifier<0||keys_.at(b.modifier)));else for(const auto& item:pads_){const auto& p=item.second;if(!accepts(p))continue;if(b.kind==InputBinding::Kind::Button)down=down||(p.buttons.at(b.code)&&(b.modifier<0||p.buttons.at(b.modifier)));else{const auto raw=p.axes.at(b.code);const float axis=raw<0?raw/32768.f:raw/32767.f;down=down||axis*b.direction>=(navigation(a)?config_.menu_threshold:config_.deadzone);}}}
         if(edges&&down&&!held_[a])pending_[a]=true;held_[a]=down;}}
