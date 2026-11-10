@@ -1,4 +1,4 @@
-// On-screen touch gamepad for iOS/iPadOS: the view over the SDL window. Host adaptation, no game logic.
+// On-screen touch gamepad for iOS/iPadOS: a transparent window over SDL's. Host adaptation, no game logic.
 // Layout and touch ownership are touch_pad.cpp (ported from nxnative's DmGamepad.m / DmLayout.h; the
 // licence is in touch_pad.h); this file draws the controls as nxnative does and feeds an SDL virtual
 // game controller, so controls.ini, the OPTION rebinding screen and the menus see an ordinary pad.
@@ -109,6 +109,7 @@ static int SDLCALL rumble_callback(void* userdata,Uint16 low,Uint16 high){
 -(BOOL)pointInside:(CGPoint)p withEvent:(UIEvent*)event{(void)event;RECVXTouchPad* pad=(RECVXTouchPad*)self.superview;return [pad menuTakes:[self convertPoint:p toView:pad]];}
 @end
 static __weak RECVXTouchPad* g_pad;
+static __weak UIWindow* g_sdl_window; // SDL's window, below the gamepad's
 
 static UIColor *k_idle,*k_on,*k_line,*k_ring_fill,*k_text,*k_text_on;
 static CAShapeLayer* shape(CALayer* parent){
@@ -304,8 +305,8 @@ static const Key k_locked[]={touch::TriggerL,touch::ShoulderL,touch::TriggerR,to
     NSString* line=[NSString stringWithFormat:@"%@, hinge %ld%s, picture %@, controls %@",layout.separated?@"split":@"overlay",(long)_hingeStatus,_partiallyOpen?" (half open)":"",
                     NSStringFromCGRect(cg(layout.picture)),NSStringFromCGRect(cg(layout.controls))];
     if(![line isEqualToString:_layoutLog]){_layoutLog=line;std::cout<<"Touch controls: layout "<<line.UTF8String<<std::endl;}
-    UIView* picture=self.window.rootViewController.view; // the SDL view: the whole window in the overlay layout, the part above the controls in the split one
-    if(picture&&picture!=self&&!CGRectEqualToRect(picture.frame,cg(layout.picture))){picture.frame=cg(layout.picture);[picture setNeedsLayout];}
+    UIView* picture=g_sdl_window.rootViewController.view; // the SDL view: the whole window in the overlay layout, the part above the controls in the split one
+    if(picture&&!CGRectEqualToRect(picture.frame,cg(layout.picture))){picture.frame=cg(layout.picture);[picture setNeedsLayout];}
     const CGFloat u=_pad.u();
     [CATransaction begin];[CATransaction setDisableActions:YES];
     const CGFloat scale=MAX(self.traitCollection.displayScale,1);
@@ -347,7 +348,7 @@ static const Key k_locked[]={touch::TriggerL,touch::ShoulderL,touch::TriggerR,to
 
 // ---- Touch ----
 -(BOOL)menuTakes:(CGPoint)p{return _pad.menu_takes(pt(p));}
--(UIView*)hitTest:(CGPoint)p withEvent:(UIEvent*)event{ // hidden: only the gear is here, every other touch passes through
+-(UIView*)hitTest:(CGPoint)p withEvent:(UIEvent*)event{ // hidden: only the gear is here, every other touch passes on to SDL's window
     UIView* view=[super hitTest:p withEvent:event];
     return view==self&&_pad.hidden()?nil:view;
 }
@@ -367,10 +368,30 @@ static touch::Pad::TouchId touch_id(UITouch* t){return touch::Pad::TouchId((__br
 -(void)releaseAll{_pad.reset();[self publish];}
 @end
 
-// ios_scene.mm ios_fit_view: where the SDL view belongs in this window; CGRectNull without a touch gamepad.
+// The gamepad has a window of its own above SDL's: UIKit presents the gear's menu from a view controller, and
+// the gamepad must cover the whole screen while the SDL view, in the split layout, covers only the part above
+// the controls. The window passes on every touch its views do not take, and never becomes the key window.
+@interface RECVXTouchPadController:UIViewController
+@end
+@implementation RECVXTouchPadController
+-(void)loadView{self.view=[[RECVXTouchPad alloc] initWithFrame:CGRectZero];}
+-(BOOL)prefersHomeIndicatorAutoHidden{return YES;}
+-(UIRectEdge)preferredScreenEdgesDeferringSystemGestures{return UIRectEdgeAll;} // edge gestures need two swipes, the controls hug the edges
+-(BOOL)prefersStatusBarHidden{return YES;}
+-(UIInterfaceOrientationMask)supportedInterfaceOrientations{return UIInterfaceOrientationMaskAll;} // Info.plist narrows it
+@end
+@interface RECVXTouchWindow:UIWindow
+@end
+@implementation RECVXTouchWindow
+-(UIView*)hitTest:(CGPoint)p withEvent:(UIEvent*)event{UIView* view=[super hitTest:p withEvent:event];return view==self?nil:view;}
+-(BOOL)canBecomeKeyWindow{return NO;} // SDL's window keeps the keyboard and controller focus
+@end
+static RECVXTouchWindow* g_window;
+
+// ios_scene.mm ios_fit_view: where the SDL view belongs in its window; CGRectNull without a touch gamepad.
 extern "C" CGRect recvx_ios_touch_picture_frame(UIWindow* window){
     RECVXTouchPad* pad=g_pad;
-    if(!pad||!window||pad.window!=window)return CGRectNull;
+    if(!pad||!window||window!=g_sdl_window)return CGRectNull;
     return cg([pad measuredLayout].picture);
 }
 
@@ -389,9 +410,12 @@ void ios_touch_pad_attach(SDL_Window* window){
     if(index<0||!(g_joystick=SDL_JoystickOpen(index))){std::cerr<<"Touch controls unavailable: "<<SDL_GetError()<<'\n';return;}
     publish_state(touch::State{}); // triggers to their rest value before the first touch
     uiwindow.backgroundColor=UIColor.blackColor; // behind the picture and the controls in the split layout
-    RECVXTouchPad* pad=[[RECVXTouchPad alloc] initWithFrame:uiwindow.bounds];
-    pad.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
-    [uiwindow addSubview:pad];g_pad=pad;
+    g_sdl_window=uiwindow;
+    g_window=uiwindow.windowScene?[[RECVXTouchWindow alloc] initWithWindowScene:uiwindow.windowScene]:[[RECVXTouchWindow alloc] initWithFrame:uiwindow.frame];
+    g_window.windowLevel=uiwindow.windowLevel+1;g_window.backgroundColor=UIColor.clearColor;
+    g_window.rootViewController=[RECVXTouchPadController new];
+    RECVXTouchPad* pad=(RECVXTouchPad*)g_window.rootViewController.view;g_pad=pad;
+    g_window.hidden=NO;
     [pad setNeedsLayout];[pad layoutIfNeeded];
 }
 }
