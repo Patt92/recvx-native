@@ -407,7 +407,8 @@ void ios_touch_pad_attach(SDL_Window* window){
     desc.vendor_id=touch::virtual_vendor;desc.product_id=touch::virtual_product;desc.name="RECVX Touch";
     desc.Rumble=rumble_callback;
     const int index=SDL_JoystickAttachVirtualEx(&desc);
-    if(index<0||!(g_joystick=SDL_JoystickOpen(index))){std::cerr<<"Touch controls unavailable: "<<SDL_GetError()<<'\n';return;}
+    if(index<0){std::cerr<<"Touch controls unavailable: "<<SDL_GetError()<<'\n';return;}
+    if(!(g_joystick=SDL_JoystickOpen(index))){std::cerr<<"Touch controls unavailable: "<<SDL_GetError()<<'\n';SDL_JoystickDetachVirtual(index);return;} // leave no orphan device behind
     publish_state(touch::State{}); // triggers to their rest value before the first touch
     uiwindow.backgroundColor=UIColor.blackColor; // behind the picture and the controls in the split layout
     g_sdl_window=uiwindow;

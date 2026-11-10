@@ -202,8 +202,9 @@ static void sticks_and_state(){
     check(!pad.arrange(bounds,{},l)&&pad.state().keys!=0,"an unchanged layout released the keys");
     check(pad.arrange({0,0,430,932},{},layout({0,0,430,932},{},false,Rect::none(),wide))&&pad.state().keys==0,"a pose change leaves keys held");
     pad.arrange(bounds,{},l);
-    pad.begin(7,pad.face_pos(FaceTop));pad.set_hidden(true);
+    pad.take_press_edge();pad.begin(7,pad.face_pos(FaceTop));pad.set_hidden(true); // the press edge of touch 7 was never read
     check(pad.state().keys==0,"hiding the gamepad leaves a key held");
+    check(!pad.take_press_edge(),"releasing every touch reports a press edge");
     pad.begin(8,pad.face_pos(FaceTop));check(pad.state().keys==0&&!pad.control_at(pad.face_pos(FaceTop)),"a hidden gamepad takes touches");pad.end(8);
     check(pad.menu_takes(pad.menu_center()),"the menu button is gone while the gamepad hides");
     pad.set_hidden(false);pad.begin(8,pad.face_pos(FaceTop));check(pad.state().keys==bit(FaceTop),"the gamepad does not come back");pad.end(8);

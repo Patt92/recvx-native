@@ -217,7 +217,7 @@ void Pad::end(TouchId id){
     for(auto& touch:stick_touch_)if(touch==id)touch=0;
     recompute();
 }
-void Pad::reset(){owners_.clear();stick_touch_.fill(0);recompute();}
+void Pad::reset(){owners_.clear();stick_touch_.fill(0);recompute();press_edge_=false;} // a release is never a press: drop an edge nobody read yet
 void Pad::recompute(){
     std::uint32_t keys=0;
     for(const auto& item:owners_){
