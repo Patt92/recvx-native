@@ -40,7 +40,7 @@ brought up separately from the shared gameplay code.
 | **Windows x64** | Build support, the Direct3D 11 backend and optional Vulkan and Direct3D 12 backends are present; validated Windows releases are planned. |
 | **Windows ARM64** | Native build with Visual Studio 2026 Insiders (MSVC 19.52, Ninja) on Windows 11 ARM64, with Direct3D 11 on the Parallels Display Adapter (WDDM GPU) and software rendering verified. |
 | **Linux** | Native build with OpenGL selected by default and optional Vulkan; Linux driver/hardware validation remains open. |
-| **iOS/iPadOS** | Runs on iPhone (iOS 27) and iPad with a Bluetooth game controller — the native build plays as it is, sideloaded as a complete IPA with the game data inside: [`./build.sh --platform ios --compressed --package`](#ios--ipados); tested by hand by the project owner on both devices. CI builds the device and simulator apps and checks packaging and bundle structure; no automated gameplay run on iOS. No touch controls yet. |
+| **iOS/iPadOS** | Runs on iPhone (iOS 27) and iPad with a Bluetooth game controller — the native build plays as it is, sideloaded as a complete IPA with the game data inside: [`./build.sh --platform ios --compressed --package`](#ios--ipados); tested by hand by the project owner on both devices. CI builds the device and simulator apps and checks packaging and bundle structure; no automated gameplay run on iOS. On-screen [touch controls](docs/CONTROLS.md#touch-controls-iosipados) hide while a controller is connected. |
 | **Android** | Native arm64 APK (`./build.sh --platform android`, API 26+) with optional Vulkan as GPU default and software fallback; game data loose on the device. Runs in the arm64 emulator; real devices, touch controls and release signing are open. |
 | **Web (Firefox, Chrome)** | The native engine as WebAssembly, served by a Docker container on port 8722 (`docker compose up -d`, or the prebuilt [`ghcr.io/patt92/recvx-native-web`](https://github.com/Patt92/recvx-native/pkgs/container/recvx-native-web) image); software rasterizer on worker threads, WebGL 2 presentation, saves in the browser. Verified in Firefox and Chromium on macOS from the title through free play and LOAD GAME. |
 | **Apple TV** | Native tvOS build sharing the iOS path (`./build.sh --platform tvos`): Metal, bundled compressed data, Bluetooth game controller. Builds and links; not yet started on a device (the iPhone/iPad tests do not cover tvOS). |
@@ -487,8 +487,9 @@ signed with a certificate tied to your Apple ID before it goes on the device:
   signed `RECVX-Native.ipa`; `--install --ios-device <id>` installs it directly.
 
 Neither route touches the game: the IPA is the same native build, only the
-signature differs. Input is a Bluetooth game controller (same bindings as the
-desktop controller page); touch controls do not exist yet.
+signature differs. Input is the on-screen touch gamepad or a Bluetooth game
+controller, with the same bindings as the desktop controller page
+([touch controls](docs/CONTROLS.md#touch-controls-iosipados)).
 
 **Updates.** A newer IPA installs over the old one and keeps saves, snapshots,
 settings and `Documents/data`, as long as the bundle identifier and the signing

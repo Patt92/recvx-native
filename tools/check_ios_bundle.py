@@ -3,7 +3,8 @@
 
 Checks what an in-place IPA update and the app start depend on: bundle id, a CFBundleVersion that matches
 tools/build_native.py FULL_VERSION, platform and architecture of the executable, the UIScene delegate
-(iOS 27 SDK), file sharing for Documents/data, ProMotion, iPhone+iPad device families, icons, weakly linked
+(iOS 27 SDK), file sharing for Documents/data, ProMotion, iPhone+iPad device families, the touch gamepad and its
+orientations, icons, weakly linked
 MetalFX and no stale data/ in a slim bundle (--ios-no-bundle-data). It reads only; Xcode command-line
 tools (otool, nm, lipo) are required. Exit 0 = ok, 1 = finding, 77 = no bundle to check (CTest skip)."""
 import argparse
@@ -44,6 +45,10 @@ def check_app(app: Path, target: str, bundle_data: bool | None, bundle_id: str) 
     expect(any(s.get('UISceneDelegateClassName') == 'RECVXSceneDelegate' for s in scenes), 'no UIScene manifest with RECVXSceneDelegate')
     if ios:
         expect(set(info.get('UIDeviceFamily', [])) == {1, 2}, f'UIDeviceFamily {info.get("UIDeviceFamily")}, expected iPhone and iPad')
+        # Touch gamepad (native/ios_touch_pad.mm): landscape overlay and the portrait split need all three orientations.
+        wanted = {'UIInterfaceOrientationLandscapeLeft', 'UIInterfaceOrientationLandscapeRight', 'UIInterfaceOrientationPortrait'}
+        for key in ('UISupportedInterfaceOrientations', 'UISupportedInterfaceOrientations~ipad'):
+            expect(wanted <= set(info.get(key, [])), f'{key} {info.get(key)} lacks landscape or portrait (touch gamepad layouts)')
         expect(info.get('UIFileSharingEnabled') is True and info.get('LSSupportsOpeningDocumentsInPlace') is True,
                'file sharing for Documents/data is off')
         expect(info.get('CADisableMinimumFrameDurationOnPhone') is True, 'CADisableMinimumFrameDurationOnPhone missing (ProMotion)')
@@ -54,7 +59,9 @@ def check_app(app: Path, target: str, bundle_data: bool | None, bundle_id: str) 
     platform = re.search(r'cmd LC_BUILD_VERSION\n.*?\n\s*platform (\d+)', tool('otool', '-l', str(executable)), re.S)
     expect(platform is not None and platform.group(1) == build_native.APPLE_TARGETS[target][1],
            f'LC_BUILD_VERSION platform {platform.group(1) if platform else "?"}, expected {build_native.APPLE_TARGETS[target][1]}')
-    expect('RECVXSceneDelegate' in tool('nm', '-U', str(executable)), 'RECVXSceneDelegate class not in the executable')
+    symbols = tool('nm', '-U', str(executable))
+    expect('RECVXSceneDelegate' in symbols, 'RECVXSceneDelegate class not in the executable')
+    expect(('RECVXTouchPad' in symbols) == ios, 'touch gamepad (RECVXTouchPad) ' + ('missing from the iOS executable' if ios else 'present in a tvOS executable'))
     metalfx = [line for line in tool('otool', '-L', str(executable)).splitlines() if 'MetalFX.framework' in line]
     if target.endswith('simulator'):
         expect(not metalfx, 'simulator app links MetalFX (the simulator SDKs have none)')

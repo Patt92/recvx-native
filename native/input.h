@@ -2,6 +2,7 @@
 #include <SDL.h>
 #include "ui.h"
 #include "events.h"
+#include "touch_pad.h"
 #include <array>
 #include <filesystem>
 #include <map>
@@ -59,14 +60,19 @@ public:
     // Include the release frame so the simulation can consume the cleared buttons before pausing.
     bool player_input_pending()const{return player_input()||player_input_sampled_;}
     bool player_input()const{for(const auto a:{Action::Forward,Action::Back,Action::TurnLeft,Action::TurnRight,Action::Run,Action::Aim,Action::Attack})if(held_[unsigned(a)])return true;return false;}
-    std::size_t controllers()const{return pads_.size();}
+    // The on-screen touch gamepad (iOS, native/ios_touch_pad.mm) is an SDL virtual controller with this
+    // vendor / product pair. It is player 1's, together with that player's first real controller: it holds
+    // no controller slot and is not counted as a connected controller.
+    static constexpr Uint16 touch_pad_vendor=touch::virtual_vendor,touch_pad_product=touch::virtual_product;
+    std::size_t controllers()const{std::size_t count=0;for(const auto& item:pads_)if(!item.second.touch)++count;return count;}
+    bool touch_pad()const{for(const auto& item:pads_)if(item.second.touch)return true;return false;}
     // scePadSetActDirect of the frame: big motor (low frequency) and small motor.
     void rumble(unsigned low,unsigned high,unsigned milliseconds);
 private:
-    struct Pad {SDL_GameController* handle=nullptr;unsigned slot=0;std::array<Sint16,SDL_CONTROLLER_AXIS_MAX> axes{};std::array<Uint8,SDL_CONTROLLER_BUTTON_MAX> buttons{};};
+    struct Pad {SDL_GameController* handle=nullptr;unsigned slot=0;bool touch=false;std::array<Sint16,SDL_CONTROLLER_AXIS_MAX> axes{};std::array<Uint8,SDL_CONTROLLER_BUTTON_MAX> buttons{};};
     InputConfig config_;
     Route route_;
-    bool accepts(const Pad& pad)const{return route_.controller_slot<0||pad.slot==unsigned(route_.controller_slot);}
+    bool accepts(const Pad& pad)const{return pad.touch?route_.controller_slot<=0:route_.controller_slot<0||pad.slot==unsigned(route_.controller_slot);}
     std::array<bool,SDL_NUM_SCANCODES> keys_{};
     std::map<SDL_JoystickID,Pad> pads_;
     std::array<bool,action_count> held_{},pending_{},suppressed_{};

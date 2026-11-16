@@ -10,6 +10,9 @@
 #include "ios_scene.h"
 
 static UIWindowScene* recvx_window_scene=nil;
+#if !defined(RECVX_TVOS)
+extern "C" CGRect recvx_ios_touch_picture_frame(UIWindow* window); // ios_touch_pad.mm; CGRectNull without a touch gamepad
+#endif
 
 @interface RECVXSceneDelegate:UIResponder<UIWindowSceneDelegate>
 @property(strong,nonatomic) UIWindow* window;
@@ -36,8 +39,13 @@ bool ios_fit_view(SDL_Window* window){
     SDL_SysWMinfo info;SDL_VERSION(&info.version);
     if(!SDL_GetWindowWMInfo(window,&info)||info.subsystem!=SDL_SYSWM_UIKIT)return false;
     UIWindow* uiwindow=info.info.uikit.window;UIView* view=uiwindow.rootViewController.view;
-    if(!view||CGRectEqualToRect(view.frame,uiwindow.bounds))return false;
-    view.frame=uiwindow.bounds;[view setNeedsLayout];[view layoutIfNeeded]; // layoutSubviews setzt drawableSize neu
+    CGRect target=uiwindow.bounds;
+#if !defined(RECVX_TVOS)
+    // Touch gamepad in the split layout (portrait, a foldable half open): the picture sits above the controls.
+    const CGRect picture=recvx_ios_touch_picture_frame(uiwindow);if(!CGRectIsNull(picture))target=picture;
+#endif
+    if(!view||CGRectEqualToRect(view.frame,target))return false;
+    view.frame=target;[view setNeedsLayout];[view layoutIfNeeded]; // layoutSubviews setzt drawableSize neu
     return true;
 }
 bool ios_exclude_from_backup(const char* path,std::string& reason){

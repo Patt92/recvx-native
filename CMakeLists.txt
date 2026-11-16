@@ -413,6 +413,12 @@ if(RECVX_BUILD_RUNTIME)
     # UIScene-Lebenszyklus (iOS-27-SDK verlangt ihn), SDL 2.32 kennt keine Scenes.
     set_source_files_properties(native/ios_scene.mm PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-fobjc-arc")
     target_sources(recvx-runtime PRIVATE native/ios_scene.mm)
+    if(NOT TVOS)
+      # On-screen touch gamepad (iOS/iPadOS): a view over the SDL window feeding an SDL virtual controller.
+      set_source_files_properties(native/ios_touch_pad.mm PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-fobjc-arc")
+      target_sources(recvx-runtime PRIVATE native/ios_touch_pad.mm)
+      target_link_libraries(recvx-runtime PRIVATE "-framework CoreText")
+    endif()
     target_link_libraries(recvx-runtime PRIVATE "-framework UIKit" "-framework QuartzCore" "-framework GameController"
       "-framework CoreHaptics" "-framework AVFoundation" "-framework AudioToolbox" "-framework CoreAudio"
       ${recvx_apple_frameworks} "-framework CoreGraphics" "-framework OpenGLES")
@@ -462,7 +468,7 @@ if(RECVX_BUILD_RUNTIME)
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_no_original_core.py"
       "${CMAKE_CURRENT_SOURCE_DIR}" --build-dir "${CMAKE_CURRENT_BINARY_DIR}" --binary "${recvx_runtime_audited}" ${recvx_runtime_audit_nm}
     VERBATIM)
-  add_library(recvx_input native/host_process.cpp native/netplay.cpp native/trade_menu.cpp native/input.cpp native/frontend.cpp native/debug_menu.cpp native/third_person.cpp native/video_settings.cpp native/audio_settings.cpp native/vibration.cpp)
+  add_library(recvx_input native/host_process.cpp native/netplay.cpp native/trade_menu.cpp native/input.cpp native/touch_pad.cpp native/frontend.cpp native/debug_menu.cpp native/third_person.cpp native/video_settings.cpp native/audio_settings.cpp native/vibration.cpp)
 if(WIN32)
   target_link_libraries(recvx_input PUBLIC ws2_32)
 endif()
@@ -511,6 +517,9 @@ endif()
     add_executable(recvx-input-tests tests/native/input_test.cpp)
     target_link_libraries(recvx-input-tests PRIVATE recvx_input)
     add_test(NAME keyboard_controller_config COMMAND recvx-input-tests)
+    add_executable(recvx-touch-pad-tests tests/native/touch_pad_test.cpp)
+    target_link_libraries(recvx-touch-pad-tests PRIVATE recvx_input)
+    add_test(NAME touch_pad_layout_ownership COMMAND recvx-touch-pad-tests)
     add_executable(recvx-player2-tests tests/native/player2_test.cpp)
     target_link_libraries(recvx-player2-tests PRIVATE recvx_input)
     add_executable(recvx-netplay-tests tests/native/netplay_test.cpp)
