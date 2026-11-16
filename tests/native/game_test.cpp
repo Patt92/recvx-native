@@ -410,6 +410,13 @@ int main(int argc,char** argv){try{
         check(cut.errors.empty()&&cut.flag(4,13)&&scripted==9&&cut.fixcno==9&&(cut.flags[5][0]&1)&&!(cut.flags[11][0]&0x1000),"bhCamSet2 leaves gm_flg 0x1000 or loses sys->fixcno");
         cut.control_exm();check(!exm_cuts,"script fixed cut re-run by game.c:274 with stale fixcno");
     }
+    { // event.c:4732-4747 bhInitCamSet (0x5b, ELF 0x15E62C-0x15E638): st_flg 0x1 faellt vor bhCheckCut(1)
+        auto binary=data;binary[1118]=0;const std::vector<std::uint8_t> script={0x5b,0,5,4,13,0,0,0,0xff,0};std::copy(script.begin(),script.end(),binary.begin()+1180);
+        MessageDialog text;Inventory state;EventVm cut(binary,state,text);unsigned calls=0;bool held_at_bind=true;
+        cut.binding=[&](const EventCommand& c){if(c.opcode==0x5b){++calls;held_at_bind=(cut.flags[5][0]&1u)!=0;}return true;};
+        cut.flags[5][0]|=1u;cut.start(0,0);cut.tick();
+        check(cut.errors.empty()&&cut.flag(4,13)&&calls==1&&!held_at_bind&&!(cut.flags[5][0]&1u),"bhInitCamSet must clear st_flg 0x1 before bhCheckCut(1)");
+    }
     // Original room choices hand their result to scd1 for one pass. Both
     // Yes and No acknowledge the interaction; inventory questions do not.
     for(unsigned selected:{0u,1u}){

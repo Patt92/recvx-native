@@ -182,6 +182,12 @@ int main(){try{
      front.input(MenuInput::Right);check(video.settings().post_process==PostProcess::Off,"post-process wrap");
      video.set_availability(false,false,false);
      front.input(MenuInput::Right);check(video.settings().post_process==PostProcess::Off&&row_text(Frontend::post_process_row)=="Not available"&&row_text(Frontend::sharpness_row)=="Not available","no stage: CRT/sharpen not available");
+     while(front.selected()!=Frontend::gamma_row)front.input(MenuInput::Down);
+     check(video.settings().gamma==Gamma::Neutral,"gamma neutral default");
+     front.input(MenuInput::Right);check(video.settings().gamma==Gamma::Lift17&&VideoSettings::read(video_path).gamma==Gamma::Lift17,"gamma works without presentation stage and persists");
+     front.input(MenuInput::Right);check(video.settings().gamma==Gamma::Lift22,"gamma 2.2");
+     front.input(MenuInput::Right);check(video.settings().gamma==Gamma::Neutral,"gamma wraps to neutral");
+     while(front.selected()!=Frontend::post_process_row)front.input(MenuInput::Up);
      {std::ofstream old(video_path);old<<"quality = high\npost_process = sharpen\n";}check(VideoSettings::read(video_path).sharpness==Sharpness::Medium&&VideoSettings::read(video_path).post_process==PostProcess::Off,"old sharpen value not mapped");
      {std::ofstream old(video_path);old<<"quality = high\npost_process = crt\n";}check(VideoSettings::read(video_path).post_process==PostProcess::CrtLight,"old crt value not mapped");
      video.set_upscaler(Upscaler::MetalFxTemporal);video.set_renderer(RenderBackend::Vulkan);

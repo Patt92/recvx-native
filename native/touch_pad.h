@@ -64,7 +64,7 @@ Rect horizontal_division(Rect bounds,Rect division);
 Insets game_safe_insets(Rect bounds,Insets insets,bool foldable);
 // Landscape: the controls lie over the picture (overlay), unless the hinge is half open over a fold
 // that crosses the view. Portrait: always split, at the fold or at the midline.
-Layout layout(Rect bounds,Insets insets,bool partially_open,Rect division,double aspect);
+Layout layout(Rect bounds,Insets insets,bool partially_open,Rect division,double aspect,bool controls_visible=true);
 
 // ---- The controls ----
 // Keys by position, in nxnative's order (its A B X Y are right, bottom, top, left).

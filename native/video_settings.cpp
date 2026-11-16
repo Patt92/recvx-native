@@ -15,6 +15,8 @@ constexpr const char* frame_generation_names[]={"off","metalfx","fsr"};
 constexpr const char* frame_generation_labels[]={"Off","MetalFX frame interpolation","FSR frame generation"};
 constexpr const char* sharpness_names[]={"off","light","medium","strong"};
 constexpr const char* sharpness_labels[]={"Off","Light","Medium","Strong"};
+constexpr const char* gamma_names[]={"1.0","1.7","2.2"};
+constexpr const char* gamma_labels[]={"1.0 (original)","1.7","2.2"};
 constexpr const char* post_process_names[]={"off","crt-light","crt-full"};
 constexpr const char* post_process_labels[]={"Off","CRT light (scanlines)","CRT full (mask, bloom)"};
 template<class E,std::size_t N> bool parse(const char* const (&table)[N],const std::string& value,E& out){
@@ -27,6 +29,7 @@ std::string VideoSettings::describe_frame_rate()const{return frame_rate_labels[i
 std::string VideoSettings::describe_upscaler()const{return upscaler_labels[int(upscaler)];}
 std::string VideoSettings::describe_frame_generation()const{return frame_generation_labels[int(frame_generation)];}
 std::string VideoSettings::describe_sharpness()const{return sharpness_labels[int(sharpness)];}
+std::string VideoSettings::describe_gamma()const{return gamma_labels[int(gamma)];}
 std::string VideoSettings::describe_post_process()const{return post_process_labels[int(post_process)];}
 VideoSettings VideoSettings::read(const std::filesystem::path& path){
     VideoSettings out;std::ifstream file(path);if(!file)return out;std::string line;
@@ -43,6 +46,7 @@ VideoSettings VideoSettings::read(const std::filesystem::path& path){
         if(key=="frame_rate"){if(!parse(frame_rate_names,value,out.frame_rate))throw std::runtime_error("invalid video frame_rate: "+value);continue;}
         if(key=="upscaler"){if(!parse(upscaler_names,value,out.upscaler))throw std::runtime_error("invalid video upscaler: "+value);continue;}
         if(key=="frame_generation"){if(!parse(frame_generation_names,value,out.frame_generation))throw std::runtime_error("invalid video frame_generation: "+value);continue;}
+        if(key=="gamma"){if(!parse(gamma_names,value,out.gamma))throw std::runtime_error("invalid video gamma: "+value);continue;}
         if(key=="sharpness"){if(!parse(sharpness_names,value,out.sharpness))throw std::runtime_error("invalid video sharpness: "+value);continue;}
         if(key=="post_process"){if(value=="sharpen"){out.sharpness=Sharpness::Medium;continue;}if(value=="crt"){out.post_process=PostProcess::CrtLight;continue;} /* fruehere Werte */if(!parse(post_process_names,value,out.post_process))throw std::runtime_error("invalid video post_process: "+value);continue;}
         if(key=="fullscreen"){if(value=="on")out.fullscreen=true;else if(value=="off")out.fullscreen=false;else throw std::runtime_error("invalid video fullscreen: "+value);continue;}
@@ -62,6 +66,7 @@ void VideoSettings::save(const std::filesystem::path& path)const{
         <<"# Frame generation: off, metalfx (macOS/iOS 26 or newer) or fsr (Windows, AMD FSR frame generation DLL)\nframe_generation = "<<frame_generation_names[int(frame_generation)]<<'\n'
         <<"# Sharpening of the presented image (contrast-adaptive): off, light, medium or strong\nsharpness = "<<sharpness_names[int(sharpness)]<<'\n'
         <<"# CRT post-processing of the presented image: off, crt-light or crt-full\npost_process = "<<post_process_names[int(post_process)]<<'\n'
+        <<"# Host display gamma: 1.0 (unchanged), 1.7 or 2.2 (brighter midtones)\ngamma = "<<gamma_names[int(gamma)]<<'\n'
         <<"# Widescreen mod (16:9, like the GameCube/PS2 patches; HUD is stretched): off or on\nwidescreen = "<<(widescreen?"on":"off")<<'\n'
         <<"# Window: off = resizable window, on = borderless fullscreen on the current display\nfullscreen = "<<(fullscreen?"on":"off")<<'\n';
     if(path.has_parent_path())std::filesystem::create_directories(path.parent_path());
@@ -110,6 +115,8 @@ template<class T> static T cycle_in(const std::vector<T>& choices,T current,int 
 void VideoConfig::cycle_upscaler(int direction,bool persist){set_upscaler(cycle_in(upscaler_choices(),settings_.upscaler,direction),persist);}
 void VideoConfig::cycle_frame_generation(int direction,bool persist){set_frame_generation(cycle_in(frame_generation_choices(),settings_.frame_generation,direction),persist);}
 void VideoConfig::cycle_sharpness(int direction,bool persist){set_sharpness(cycle_in(sharpness_choices(),settings_.sharpness,direction),persist);}
+void VideoConfig::cycle_gamma(int direction,bool persist){set_gamma(Gamma((int(settings_.gamma)+(direction<0?2:1))%3),persist);}
+void VideoConfig::set_gamma(Gamma value,bool persist){if(unsigned(value)>unsigned(Gamma::Lift22))throw std::runtime_error("invalid display gamma");settings_.gamma=value;this->persist(persist);}
 void VideoConfig::cycle_post_process(int direction,bool persist){set_post_process(cycle_in(post_process_choices(),settings_.post_process,direction),persist);}
 std::string VideoConfig::describe_upscaler()const{return settings_.describe_upscaler()+(settings_.upscaler!=Upscaler::Off&&(!upscaler_available_||!(upscaler_mask_&(1u<<unsigned(settings_.upscaler))))?" (not available)":"");}
 std::string VideoConfig::describe_frame_generation()const{return settings_.describe_frame_generation()+(settings_.frame_generation!=FrameGeneration::Off&&(!frame_generation_available_||settings_.frame_generation!=frame_generation_kind_)?" (not available)":"");}

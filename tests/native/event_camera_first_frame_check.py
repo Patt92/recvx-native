@@ -41,7 +41,12 @@ def main():
         root = Path(folder)
         (root / 'user').mkdir()
         before = run(runtime, data, root, 111)
-        assert before['event_camera'] == 1 and before['camera_view'] and not before['camera_view']['event_init'], before['camera_view']
+        # Untersuchungskamera (bhSetEventFixedCut, game.c:278): game.c:196-237 setzt sys->sp_flg = 0x38 (|0x80)
+        # und 0x40 nur unter gm_flg 0x10000 && 0x20000 (hier gm_flg 0x10000 allein, sp_flg 0xb8). Ohne
+        # sp_flg 0x40 endet bhCheckCut vor bhControlEventCamera (cut.c:23): cam.mode0 bleibt 0, die Lage
+        # ist die rohe Schluessellage.
+        assert before['event_camera'] == 1 and before['camera_view'] and before['camera_view']['event_init'] \
+            and before['camera_view']['event_clock'] == 0, before['camera_view']
         # Die beantwortete Interaktionsmeldung meldet cb_flg 0x2000 (hitchk.c:4836-4842) und damit
         # cb_flg 0x20000000; game.c:147 reicht das erst im naechsten Durchlauf als 0x1000 an
         # bhControlEvent weiter, bhCamSet laeuft daher ein Bild nach der Antwort.

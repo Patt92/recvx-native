@@ -642,7 +642,9 @@ public:
     // ClipVolume des letzten _Make_ClipVolume-Aufrufs (bhChangeClipVolumeRM beim Raumschnitt,
     // bhChangeClipVolume bei der Ereigniskamera); nichts sonst setzt es zurueck.
     ClipVolume clip_volume()const{return installed_volume_;}
-    void tick_camera(const Scene& stage,const SceneCamera& target,std::size_t cut,bool tracking=true);
+    // cut.c:12 bhCheckCut. room_set: Aufruf aus bhSetPlayer (player.c:842), der unter sp_flg 0x48 laeuft
+    // (room.c:896-898/973-975) und das sp_flg-0x40-Tor (cut.c:23) deshalb immer passiert.
+    void tick_camera(const Scene& stage,const SceneCamera& target,std::size_t cut,bool tracking=true,bool room_set=false);
     // game.c:53-58: bhSetPlEyeCamera und bhControlCamera (camera.c:23-59) rechnen cam.mtx/vx/wpx aus der
     // cam-Lage dieses Zeitpunkts (nach bhCheckCut des Vorbildes und Task 8). Zeichnen, Effekte (cam.mtx,
     // cam.vx, cam.wpx) und der Tonmonitor lesen diesen Stand bis zum naechsten Aufruf. Vor dem ersten
@@ -776,6 +778,8 @@ public:
     NJS_POINT3 player_safe_position()const{return collision_safe_;}
     // Prueflesen: cam.plx/ply/plz (y ohne ci->h) und EXP_WORK plx/plz (nur x/z gefuehrt).
     std::optional<NJS_POINT3> camera_follow_target()const{if(!camera_target_valid_)return std::nullopt;return camera_target_;}
+    // cam.pxp/pyp/pzp, cam.axp/ayp/azp, cam.ppers: die Ziele von bhControlActiveCamera (cut.c:1232-1413).
+    const std::optional<SceneCamera>& camera_goal()const{return camera_goal_;}
     NJS_POINT3 player_camera_point()const{return player_camera_point_;}
     int player_floor_number()const{return collision_floor_;} // plp->flr_no
     void set_player_safe_position(NJS_POINT3 p){collision_safe_=p;}
@@ -1344,6 +1348,12 @@ private:
     // cam.flg 0x8 und sys->fil_no/fil_rt (cut.c:412-421/505-514); bhInitCamera (camera.c:9) nullt cam.flg.
     bool camera_filter_=false;int filter_no_=0,filter_rate_=0;
     bool camera_cut_wall_=false; // cam.flg 0x10 (cut.c:424/517: ci->flg 0x200)
+    // cam.pxp/pyp/pzp, cam.axp/ayp/azp und cam.ppers sind Dauerwerte: bhSetCut (cut.c:381-401) setzt sie aus
+    // CAM_WRK, bhInitActiveCamera rechnet die Folgebloecke einmal (Naehpunkt unter dem attr-Bit), bhSetFixedCut
+    // (:489-497) und bhSetEventCamera/bhSetEventFixedCut (:1662-1684/:1744-1752) schreiben sie ebenfalls.
+    // bhControlActiveCamera rechnet je Bild nur die Komponenten neu, deren Block laeuft UND deren Bit im
+    // Schnittbereich frei ist; alle anderen behalten ihren Stand. camera_goal_cut_ ist cam.ncut dazu.
+    std::optional<SceneCamera> camera_goal_;std::size_t camera_goal_cut_=0;
     std::uint32_t cam_attr_=0; // cam.attr (camera.c:15 0 bei Raumladen; cut.c:304/:1220 geschrieben, :277 Rueckfall)
     // Fog owner (sync.c:143-255 bhControlEOR): cam.fog_* as handed over by
     // bhSetCut/bhSetFixedCut/bhSetEventCamera, sys->fog_ct/fog_cngct, the

@@ -277,6 +277,7 @@ static const Key k_locked[]={touch::TriggerL,touch::ShoulderL,touch::TriggerR,to
 #endif
     if(real!=_pad.hidden()){
         _pad.set_hidden(real);[self publish];
+        [self setNeedsLayout]; // controller handoff changes portrait picture space as well as control visibility
         std::cout<<"Touch controls: "<<(real?"hidden, a controller is connected":"shown")<<std::endl;
     }
     [CATransaction begin];[CATransaction setDisableActions:YES];_controls.hidden=real;[CATransaction commit];
@@ -294,7 +295,7 @@ static const Key k_locked[]={touch::TriggerL,touch::ShoulderL,touch::TriggerR,to
     }
 #endif
     const bool foldPortrait=b.size.height>b.size.width&&(_hingeStatus!=0||!CGRectIsNull(division));
-    touch::Layout layout=touch::layout(rc(b),touch::game_safe_insets(rc(b),ins(self.safeAreaInsets),foldPortrait),_partiallyOpen,rc(division),k_picture_aspect);
+    touch::Layout layout=touch::layout(rc(b),_pad.hidden()?ins(self.safeAreaInsets):touch::game_safe_insets(rc(b),ins(self.safeAreaInsets),foldPortrait),_partiallyOpen,rc(division),k_picture_aspect,!_pad.hidden());
     layout.top_safe_only=foldPortrait;
     return layout;
 }

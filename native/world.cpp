@@ -692,6 +692,10 @@ void RoomWorld::set_event_camera(unsigned cno,unsigned kno,bool lock){
              event_camera_pose_.angles[1]=int(std::int16_t(-int(10430.381f*std::atan2(px,pz))+32768));}
          // :1686 *(int*)&cam.mode0 = 0 - the next bhControlEventCamera pass runs case 0.
          event_camera_init_=true;event_camera_paused_=false;
+         // cut.c:1662-1684 / :1744-1752: cam.pxp/pyp/pzp und cam.axp/ayp/azp nehmen die Schluessellage mit
+         // (cam.ppers bleibt). Folgt kein bhSetCut, liest bhControlActiveCamera sie als Ziel weiter.
+         if(!camera_goal_&&clip_cut_&&*clip_cut_<room_cameras_.size()){camera_goal_=room_cameras_[*clip_cut_];camera_goal_cut_=*clip_cut_;}
+         if(camera_goal_){camera_goal_->position=event_camera_pose_.position;camera_goal_->angles=event_camera_pose_.angles;}
          // cut.c:1690 (bhSetEventCamera) / :1764 (bhSetEventFixedCut): sys->st_flg |= 0x1, the
          // event-camera state that bhCamCheck (event.c:4903) and bhCheckCut read.
          if(collision_events_)collision_events_->flags[5][0]|=0x1u;
@@ -5317,7 +5321,12 @@ void RoomWorld::return_to_cut(){
             gm|=0x10u;eye_pe_ax_=0;eye_pe_pers_=11832;
             init_eye_camera();                                   // :44 bhInitPlEyeCamera (plp->flg 0x4 beendet die Augenkamera)
             return;}}                                            // :45 return: kein bhSetCut
-    event_camera=false;fixed_camera.reset();camera_force_=true;camera_target_init_=true;
+    event_camera=false;fixed_camera.reset();
+    // cut.c:23: ohne sp_flg 0x40 tut bhCheckCut(1) nichts weiter (kein bhSetCut(cam.ncut, 1)). bhCamSet 1
+    // (event.c:934/967) und bhInitCamSet (:4741) haben cam.flg 0x46 bzw. st_flg 0x1 schon geloescht; die Lage
+    // bleibt, und ein spaeteres bhCheckCut(0) erzwingt keinen Schnitt.
+    if(collision_events_&&!(collision_events_->flags[6][0]&0x40u))return;
+    camera_force_=true;camera_target_init_=true;
 }
 void RoomWorld::init_eye_camera(const Scene& stage,std::size_t cut){(void)stage;(void)cut;init_eye_camera();}
 void RoomWorld::init_eye_camera(){
@@ -5403,7 +5412,7 @@ void RoomWorld::control_eye_camera(const Scene& stage,std::size_t cut,bool hold)
     default:break;
     }
 }
-void RoomWorld::tick_camera(const Scene& stage,const SceneCamera& target,std::size_t cut,bool tracking){
+void RoomWorld::tick_camera(const Scene& stage,const SceneCamera& target,std::size_t cut,bool tracking,bool room_set){
     // bhCheckCut invokes bhSetCut only on a new cut or forced return.
     // bhSetFixedCut's clip invocation uses cam.ncut, not its cno argument.
     // Der Nebelteil von bhControlEOR (sync.c:143-255) laeuft einmal je Bild nach Task 7 und Task 8
@@ -5418,7 +5427,11 @@ void RoomWorld::tick_camera(const Scene& stage,const SceneCamera& target,std::si
     // cut.c:24-66: unter sp_flg 0x40, ohne st_flg 0x1 und mit gm_flg 0x40 (Augenkamera) prueft bhCheckCut
     // keine Schnittflaeche und ruft kein bhSetCut.
     const bool eye_cut_gate=collision_events_&&(collision_events_->flags[11][0]&0x40u)&&(collision_events_->flags[6][0]&0x40u)&&!(collision_events_->flags[5][0]&1u);
-    if(!eye_cut_gate&&!event_camera&&!fixed_camera&&(!clip_cut_||*clip_cut_!=cut||camera_force_)){
+    // cut.c:23 (ELF 0x27A310-0x27A318): ohne sys->sp_flg 0x40 endet bhCheckCut nach gm_flg &= ~0x20 - kein
+    // bhSetCut, keine Schnittflaeche, weder bhControlActiveCamera noch bhControlEventCamera/bhControlPlEyeCamera.
+    // cam (Lage, Schnitt, Versteckmasken) behaelt seinen Stand, bis ein Skript das Bit wieder setzt.
+    const bool cut_gate=!collision_events_||room_set||(collision_events_->flags[6][0]&0x40u)!=0;
+    if(cut_gate&&!eye_cut_gate&&!event_camera&&!fixed_camera&&(!clip_cut_||*clip_cut_!=cut||camera_force_)){
         // cut.c:442 bhInitActiveCamera innerhalb bhSetCut: neuer Schnitt (bhCheckCut :126) oder
         // bhCheckCut(1) aus dem Skript. Das Ende der Augenkamera (camera_force_ aus cut.c:2611) ruft
         // bhSetCut nicht; cut.c:2574 initialisiert in control_eye_camera.
@@ -5427,6 +5440,7 @@ void RoomWorld::tick_camera(const Scene& stage,const SceneCamera& target,std::si
         initialize_camera_clip(unsigned(cut));
         if(collision_events_)collision_events_->flags[11][0]|=0x20u; // cut.c:298 bhSetCut: gm_flg 0x20 (Schnittwechsel)
         if(set_cut)init_camera_target(stage,cut);
+        camera_goal_.reset(); // bhSetCut + bhInitActiveCamera (cut.c:381-442) bzw. :2574 setzen cam.p*p neu
     }
     camera_target_init_=false;
     if(restore_camera_clip_&&collision_events_){
@@ -5434,6 +5448,13 @@ void RoomWorld::tick_camera(const Scene& stage,const SceneCamera& target,std::si
         restore_camera_clip_=false;
     }
     // cut.c:12-149 bhCheckCut / game.c:53 bhSetPlEyeCamera / game.c:284 bhInitPlEyeCamera.
+    if(!cut_gate){
+        // game.c:282-285 steht vor bhCheckCut und haengt nicht an sp_flg.
+        if(!event_camera&&!fixed_camera&&(collision_events_->flags[11][0]&0x2000u))init_eye_camera(stage,cut);
+        // cam.px/py/pz, cam.ax/ay/az und cam.pers sind ein Satz: was bhSetEventCamera/bhControlEventCamera
+        // zuletzt schrieben, bleibt stehen, auch wenn bhCamSet 1 danach cam.flg 0x2 loescht (event.c:934).
+        if(event_camera)active_camera_.reset(camera(stage,target),cut);
+        return;}
     if(collision_events_&&!event_camera&&!fixed_camera){auto& gm=collision_events_->flags[11][0];const unsigned st=collision_events_->flags[5][0],sp=collision_events_->flags[6][0];
         if(gm&0x2000u)init_eye_camera(stage,cut);
         // cut.c:24-64: unter gm_flg 0x40 tut bhCheckCut nichts weiter; die Augenlage schreibt
@@ -5449,7 +5470,9 @@ void RoomWorld::tick_camera(const Scene& stage,const SceneCamera& target,std::si
         if(std::getenv("RECVX_CAM_TRACE")){const auto p=camera(stage,target);std::fprintf(stderr,"CAMTRACE evc=%u key=%u ct0=%u mode0=%d pos=%.2f,%.2f,%.2f ang=%d,%d,%d pers=%d\n",event_camera_index,event_camera_key_,event_camera_clock_,event_camera_paused_?3:(event_camera_finished_?2:1),p.position.x,p.position.y,p.position.z,p.angles[0],p.angles[1],p.angles[2],p.perspective);}
         return;
     }
-    if(fixed_camera){active_camera_.reset(stage.cameras.at(*fixed_camera),*fixed_camera);return;}
+    if(fixed_camera){active_camera_.reset(stage.cameras.at(*fixed_camera),*fixed_camera);
+        camera_goal_=stage.cameras.at(*fixed_camera);camera_goal_cut_=*fixed_camera; // cut.c:486-497 bhSetFixedCut: cam.ncut = cno, cam.p*p = CAM_WRK
+        return;}
     active_camera_.select(target,cut,camera_force_);camera_force_=false;
     // cut.c:1609-1638 (Ende von bhControlActiveCamera): ci->flg 0x40/0x80 fuehrt cam.fog_nr/fog_fr je Bild mit dem
     // Abstand cam.wp - ci->p mal cos(Blick, Abstand) nach; cam.wpx/vx stammen aus dem letzten bhControlCamera.
@@ -5488,7 +5511,27 @@ void RoomWorld::tick_camera(const Scene& stage,const SceneCamera& target,std::si
     // :1219-1220 attr = bhCheckCutAttribute(cam.plx, cam.plz, plp->flr_no); cam.attr = attr - ausserhalb jedes
     // Rechtecks des Schnitts bleibt das zuletzt gespeicherte cam.attr stehen (:277).
     if(tracking)cam_attr_=cut_attribute(stage,cut,follow.x,follow.z,collision_floor_,cam_attr_);
-    const auto controlled=tracking?camera_for_actor(stage,cut,follow,std::int8_t(collision_floor_),&active_camera_.view().position,nullptr,&cam_attr_):target;
+    auto controlled=tracking?camera_for_actor(stage,cut,follow,std::int8_t(collision_floor_),&active_camera_.view().position,nullptr,&cam_attr_):target;
+    if(tracking){
+        // cut.c:1232-1413: eine Zielkomponente wird nur neu gerechnet, wenn ihr Block laeuft (ci->w && cp->cw,
+        // ci->d && cp->cd, y0..y3, flg 0x4 oder lax/lay, laz0..3, flg 0x20) und das Bit des Schnittbereichs frei
+        // ist (0x20 x, 0x8 z, 0x10 y, 0x4 ax, 0x2 ay, 0x1 az, 0x40 pers). Sonst bleibt cam.p*p stehen; der
+        // Naehpunkt (bhCheckNearAttrOffCutRange) gilt nur in bhInitActiveCamera, also fuer den ersten Stand.
+        // Ohne flg 0x20 setzt :1412 cam.ppers je Bild auf ci->pers.
+        if(camera_goal_&&camera_goal_cut_==cut&&cut<stage.cameras.size()){
+            const auto& ci=stage.cameras[cut];const auto& held=*camera_goal_;const std::uint32_t attr=cam_attr_&0xffffu;
+            const auto any=[](const std::array<float,4>& v){return std::any_of(v.begin(),v.end(),[](float n){return n!=0;});};
+            const auto look=[&](unsigned axis){return (ci.flags&4u)||(ci.angle_limits[axis]&65535)!=0;};
+            if(!(ci.follow_x&&ci.cut_extent.x&&!(attr&0x20u)))controlled.position.x=held.position.x;
+            if(!(ci.follow_z&&ci.cut_extent.z&&!(attr&0x8u)))controlled.position.z=held.position.z;
+            if(!(any(ci.y_offsets)&&!(attr&0x10u)))controlled.position.y=held.position.y;
+            if(!(look(0)&&!(attr&0x4u)))controlled.angles[0]=held.angles[0];
+            if(!(look(1)&&!(attr&0x2u)))controlled.angles[1]=held.angles[1];
+            if(!(any(ci.roll_offsets)&&!(attr&0x1u)))controlled.angles[2]=held.angles[2];
+            if((ci.flags&0x20u)&&(attr&0x40u))controlled.perspective=held.perspective;
+        }
+        camera_goal_=controlled;camera_goal_cut_=cut;
+    }
     active_camera_.tick(controlled);
     /* Diagnose: RECVX_CAM_TRACE=1, Raumkamerapfad (bhControlActiveCamera). */
     if(std::getenv("RECVX_CAM_TRACE")){const auto& p=active_camera_.view();std::fprintf(stderr,"CAMTRACE cut=%zu fixed=%d blend=%d pos=%.2f,%.2f,%.2f ang=%d,%d,%d pers=%d\n",cut,fixed_camera?int(*fixed_camera):-1,int(active_camera_.transitioning()),p.position.x,p.position.y,p.position.z,p.angles[0],p.angles[1],p.angles[2],p.perspective);}

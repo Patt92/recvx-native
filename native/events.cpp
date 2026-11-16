@@ -425,7 +425,8 @@ int EventVm::instruction(Task& t,std::size_t& cursor){
     case 0x36:world(t,cursor,op,6);return 1;
     case 0x6a:if(!v.u8(p+1))flags[11][0]|=0x40000000u;else flags[11][0]&=~0x40000000u;return advance(2);
     case 0x2b:world(t,cursor,op,2);return 1; // bhMotionPauseSet: length 2 (opcode + mode)
-    case 0x16:case 0x18:case 0x1a:case 0x42:case 0x5b:case 0x5f:case 0x29:case 0x9c:case 0x9e:world(t,cursor,op,op==0x42?4:2);return 1;
+    case 0x5b:flags[5][0]&=~1u; /* event.c:4741 bhInitCamSet (ELF 0x15E62C-0x15E638): st_flg 0x1 faellt vor bhCheckCut(1) */world(t,cursor,op,2);return 1;
+    case 0x16:case 0x18:case 0x1a:case 0x42:case 0x5f:case 0x29:case 0x9c:case 0x9e:world(t,cursor,op,op==0x42?4:2);return 1;
     // bhFaceReSet: one enemy index; facial control is bound in RoomWorld.
     case 0x90:world(t,cursor,op,2);return 1;
     case 0xca:world(t,cursor,op,2);return 1; // event.c:8801 bhEffClearEvt (2 Bytes): bhClearEventEffect am Weltbesitzer (RoomWorld::clear_event_effects)

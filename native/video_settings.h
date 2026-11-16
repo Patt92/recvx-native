@@ -38,6 +38,7 @@ enum class FrameRate {Hz30,Hz60,Hz120,Unlimited};
 enum class FrameGeneration {Off,MetalFx,Fsr};
 enum class Sharpness {Off,Light,Medium,Strong};
 enum class PostProcess {Off,CrtLight,CrtFull};
+enum class Gamma {Neutral,Lift17,Lift22}; // host-only display adjustment, default exact bypass
 struct VideoSettings {
     RenderQuality quality=RenderQuality::High;
     RenderBackend renderer=RenderBackend::Gpu;
@@ -46,6 +47,9 @@ struct VideoSettings {
     FrameGeneration frame_generation=FrameGeneration::Off;
     Sharpness sharpness=Sharpness::Off;
     PostProcess post_process=PostProcess::Off;
+    Gamma gamma=Gamma::Neutral;
+    float gamma_amount()const{return gamma==Gamma::Lift17?1.7f:gamma==Gamma::Lift22?2.2f:1.f;}
+    std::string describe_gamma()const;
     // Host-Mod 16:9 (widescreen.h): anamorphes 640x480-Bild, Praesentation auf 16:9 gedehnt.
     bool widescreen=false;
     // Host-Fenster: Vollbild auf dem Desktop (SDL_WINDOW_FULLSCREEN_DESKTOP, randlos) statt Fenster; Standard an.
@@ -85,6 +89,8 @@ public:
     void cycle_frame_generation(int direction,bool persist=true);
     void cycle_sharpness(int direction,bool persist=true);
     void cycle_post_process(int direction,bool persist=true);
+    void cycle_gamma(int direction,bool persist=true);
+    void set_gamma(Gamma value,bool persist=true);
     void set_upscaler(Upscaler value,bool persist=true);
     void set_frame_generation(FrameGeneration value,bool persist=true);
     void set_sharpness(Sharpness value,bool persist=true);

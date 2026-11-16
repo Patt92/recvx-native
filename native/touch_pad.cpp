@@ -36,9 +36,11 @@ Rect horizontal_division(Rect b,Rect division){
 Insets game_safe_insets(Rect bounds,Insets insets,bool foldable){
     return foldable&&bounds.h>bounds.w?Insets{insets.top,0,0,0}:insets;
 }
-Layout layout(Rect b,Insets insets,bool partially_open,Rect division,double aspect){
+Layout layout(Rect b,Insets insets,bool partially_open,Rect division,double aspect,bool controls_visible){
     Layout l{aspect_fit(b,aspect),b,b,false,false};
     if(b.empty())return l;
+    // With a physical controller there is no touch panel to reserve, in either orientation.
+    if(!controls_visible){l.picture=b.inset(insets);l.game=aspect_fit(l.picture,aspect);l.controls=Rect::none();return l;}
     division=horizontal_division(b,division);
     const bool portrait=b.h>b.w;
     if(!portrait&&(!partially_open||division.null))return l;

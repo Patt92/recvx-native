@@ -23,6 +23,25 @@ current code, working tree and installed runtime.
 
 ## Working tree and delivery
 
+**Camera gate sp_flg 0x40 (working tree, 2026-11-10):** `bhCheckCut` (cut.c:22-23, ELF
+0x27A310) does nothing beyond `gm_flg &= ~0x20` while `sys->sp_flg` 0x40 is clear: no cut
+change, no active/event/eye camera pass. Room scripts clear the bit at 103 places (fades,
+relocations). Ported in `RoomWorld::tick_camera`/`return_to_cut` and the runtime cut
+selection (`follow`); `bhInitCamSet` (0x5b) now clears `st_flg` 0x1 (event.c:4741). Tests
+`camera_cut_gate` (RM_0040 fixtures and RM_1140 event 0 as a real script: 70 frames held in
+the raw key pose) and `inventory_events_assets`, counter-checks red. Old/new runtime over all
+205 rooms (240 frames, free start): camera and VM flags identical. No window or playthrough
+check.
+
+**Camera targets as persistent values (working tree, 2026-11-11):** `bhControlActiveCamera`
+(cut.c:1232-1413) recomputes a target component only when its block runs and the cut
+area's attribute bit is clear; otherwise `cam.pxp..` keep their value. The port recomputed
+the nearest free side midpoint every frame inside restricted areas, so the target jumped
+when the nearest midpoint changed. Now `RoomWorld::camera_goal_`; test `camera_goal_hold`
+(RM_0020 cut 1), counter-check red. Old/new walking replay over all 205 rooms: 16 of 1230
+poses differ, all in the 7 rooms with restricted areas (largest: RM_0150 camera height
+stays 34.01 instead of dropping to 27.59). Not checked in a window.
+
 **Face gate and pad restore (working tree, 2026-11-09):** `bhControlMask`'s
 calculation gate (face.c:96-106/228, `flg2` 0x80 after more than one unchanged
 frame, reopened by gm_flg 0x200, bhSetMask/bhFaceReSet, a running lip stream and

@@ -35,6 +35,19 @@ static void layout_cases(){
     check(near(overlay.game.w/overlay.game.h,wide,0.001)&&same(overlay.game,aspect_fit(landscape,wide)),"overlay picture is not fitted");
 
     const Rect portrait{0,0,390,844};const Insets safe{59,0,34,0};const Rect division{0,400,390,24};
+    for(const Rect bounds:{portrait,landscape}){
+        const auto controller=layout(bounds,safe,true,division,wide,false);
+        check(!controller.separated&&controller.controls.null,"physical controller must not reserve a touch panel");
+        check(same(controller.picture,bounds.inset(safe)),"controller picture must fill the safe area in either orientation");
+        check(near(controller.game.w/controller.game.h,wide,0.001),"controller picture aspect");
+    }
+    {Pad handoff;const auto touch=layout(portrait,safe,false,Rect::none(),wide);
+     handoff.arrange(portrait,safe,touch);handoff.begin(1,handoff.face_pos(FaceBottom));
+     handoff.set_hidden(true);handoff.arrange(portrait,safe,layout(portrait,safe,false,Rect::none(),wide,false));
+     check(handoff.state().keys==0&&!handoff.take_press_edge(),"controller handoff must release touches and stale press edges");
+     handoff.set_hidden(false);handoff.arrange(portrait,safe,touch);
+     check(handoff.current_layout().separated,"disconnect restores portrait touch panel");}
+
     const Layout separated=layout(portrait,safe,false,division,wide);
     check(separated.separated,"portrait ignores a valid horizontal fold");
     check(near(separated.game.min_y(),119,1)&&separated.game.max_y()<=division.min_y(),"portrait picture is not above the fold");

@@ -92,7 +92,7 @@ public:
     // Stufe dieser Plattform/dieses Geraets dort nur Off kann.
     std::string presentation_row_value(unsigned row)const;
     // Host presentation rows (video.ini): MetalFX upscaler, frame generation and post-processing.
-    static constexpr unsigned video_row=action_count+4,frame_rate_row=action_count+5,upscaler_row=action_count+6,frame_generation_row=action_count+7,sharpness_row=action_count+8,post_process_row=action_count+9,widescreen_row=action_count+10,audio_row=action_count+11,back_row=action_count+12,row_count=action_count+13;
+    static constexpr unsigned video_row=action_count+4,frame_rate_row=action_count+5,upscaler_row=action_count+6,frame_generation_row=action_count+7,sharpness_row=action_count+8,post_process_row=action_count+9,widescreen_row=action_count+10,audio_row=action_count+11,gamma_row=action_count+12,back_row=action_count+13,row_count=action_count+14;
     std::function<void(const VideoSettings&)> video_changed;
     AudioConfig* audio=nullptr;
     std::function<void(unsigned)> audio_changed;

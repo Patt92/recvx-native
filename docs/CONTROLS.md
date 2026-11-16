@@ -267,3 +267,10 @@ the original camera. A wall behind the player (for example the door just
 entered) shortens and raises the boom instead of swinging the camera around;
 the boom eases back out once there is room, and the player model fades while
 the eye sits inside it.
+
+### Physical-controller handoff
+
+When a physical controller is connected on iOS, the touch controls are released and hidden,
+and the picture uses the full safe area rather than reserving the portrait touch panel.
+Disconnecting restores the touch layout. Layout tests cover portrait, landscape and release
+of held touches and unread press edges; real Bluetooth and rotation testing remains required.
